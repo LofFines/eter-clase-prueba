@@ -283,8 +283,6 @@ function registrar_(paymentId, datos) {
   }
   try {
     var sheet = getSheet_();
-    var ss = sheet.getParent();
-    var tz = ss.getSpreadsheetTimeZone() || ETER.TZ;
     var maxRows = sheet.getMaxRows();
     var data = maxRows > 1 ? sheet.getRange(2, 1, maxRows - 1, ETER.COL.K).getValues() : [];
 
@@ -312,23 +310,24 @@ function registrar_(paymentId, datos) {
     }
 
     var origen = origenParaPlanilla_(datos.origen);
-    var hoy = Utilities.parseDate(Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd'), tz, 'yyyy-MM-dd');
-    var clase = Utilities.parseDate(datos.fecha + ' ' + datos.hora, tz, 'yyyy-MM-dd HH:mm');
+    // Fechas como número de serie de Sheets (hora de pared de Argentina), no como Date:
+    // así no depende de la zona horaria de la planilla ni del script, y Sheets no pisa el formato.
+    var hoy = serialSheets_(Utilities.formatDate(new Date(), ETER.TZ, 'yyyy-MM-dd'), '00:00');
+    var clase = serialSheets_(datos.fecha, datos.hora);
     var nota = 'Pagó $5.000 MP · id ' + paymentId + (origen.nota ? ' · ' + origen.nota : '');
 
-    // Formatos: respetamos los de la planilla; si la celda no tiene (filas nuevas), ponemos los mismos.
-    var cA = sheet.getRange(row, 1), cC = sheet.getRange(row, 3), cF = sheet.getRange(row, 6);
-    if (esFormatoGeneral_(cA.getNumberFormat())) cA.setNumberFormat(ETER.FORMATO_FECHA);
-    if (esFormatoGeneral_(cF.getNumberFormat())) cF.setNumberFormat(ETER.FORMATO_FECHA_HORA);
-    cC.setNumberFormat('@'); // WhatsApp como texto
+    // Formatos de la columna (los mismos que ya usa la planilla): A dd/mm, C texto, F dd/mm HH:mm.
+    sheet.getRange(row, 1).setNumberFormat(ETER.FORMATO_FECHA);
+    sheet.getRange(row, 3).setNumberFormat('@'); // WhatsApp como texto
+    sheet.getRange(row, 6).setNumberFormat(ETER.FORMATO_FECHA_HORA);
 
     sheet.getRange(row, 1, 1, 9).setValues([[
-      hoy,                                   // A Fecha anotación
+      hoy,                                   // A Fecha anotación (serial → se ve dd/mm)
       datos.nombre,                          // B Nombre
       whatsappVisible_(datos.whatsapp),      // C WhatsApp (texto)
       origen.valor,                          // D Anuncio de origen
       ETER.DISCIPLINAS[datos.disciplina],    // E Disciplina
-      clase,                                 // F Día y hora de la clase (fecha real → alimenta la fórmula de J)
+      clase,                                 // F Día y hora de la clase (serial → dd/mm HH:mm; alimenta la fórmula de J)
       'Sí',                                  // G ¿Confirmó?
       '',                                    // H ¿Vino?
       ''                                     // I ¿Volvió / se inscribió?
@@ -535,7 +534,12 @@ function leerJson_(s) {
 
 function escapeRe_(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
-function esFormatoGeneral_(f) { return !f || f === 'General' || f === 'general'; }
+/** "2026-10-09", "19:00" → número de serie de Sheets (días desde 30/12/1899), sin zonas horarias. */
+function serialSheets_(fecha, hora) {
+  var y = +fecha.slice(0, 4), m = +fecha.slice(5, 7), d = +fecha.slice(8, 10);
+  var hh = hora ? +hora.slice(0, 2) : 0, mm = hora ? +hora.slice(3, 5) : 0;
+  return (Date.UTC(y, m - 1, d, hh, mm) - Date.UTC(1899, 11, 30)) / 86400000;
+}
 
 function resumenError_(data) {
   if (!data) return '';

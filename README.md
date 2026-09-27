@@ -49,15 +49,15 @@ Solapa buscada **por sheetId `934024988`** (no por nombre). Encabezados en la fi
 
 | Col | Encabezado | Qué se escribe |
 |---|---|---|
-| A | Fecha anotación | Fecha de hoy (valor fecha real; la columna tiene formato `dd/mm` y validación “es número”) |
+| A | Fecha anotación | Fecha de hoy como número de serie de Sheets (formato `dd/mm`; la columna valida “es número”) |
 | B | Nombre | Nombre |
 | C | WhatsApp | Texto (`@`), p. ej. `+54 9 11 2397-8429` |
 | D | Anuncio de origen | Valor de la lista de la columna (`3 segundos`, `salsa`, `bachata`, `comunidad`, `genio`, `Orgánico / IG`, `Recomendación`, `No sabe`). Si el origen no está en la lista (p. ej. el default `WhatsApp`) se anota `No sabe` y el valor original va a Notas. |
 | E | Disciplina | `Pole` / `Acro` / `Flexi` / `Danza` |
-| F | Día y hora de la clase | **Fecha-hora real** (la columna tiene formato `dd/mm HH:mm`; se ve como `02/10 19:00`). Tiene que ser número porque la fórmula de J lo usa. |
+| F | Día y hora de la clase | **Fecha-hora como número de serie** (formato `dd/mm HH:mm`; se ve como `02/10 19:00`). Tiene que ser número porque la fórmula de J lo usa. Se escribe como serial calculado desde la hora de Argentina, no como objeto `Date`, para que no dependa de la zona horaria de la planilla y Sheets no reemplace el formato. |
 | G | ¿Confirmó? | `Sí` |
 | H, I | ¿Vino? / ¿Volvió? | vacías |
-| J | Semana | **No se toca**: `J2` tiene un ARRAYFORMULA: `=ARRAYFORMULA(IF(ISNUMBER(F2:F1000),INT(F2:F1000)-WEEKDAY(F2:F1000,3),""))` que llena J2:J1000 (rango protegido con advertencia). |
+| J | Semana | **No se toca**: `J2` tiene un ARRAYFORMULA: `=ARRAYFORMULA(IF(ISNUMBER(F2:F);INT(F2:F)-WEEKDAY(F2:F;3);""))` que llena toda la columna (J2:J1000 está protegido con advertencia). |
 | K | Notas | `Pagó $5.000 MP · id <payment_id>` |
 
 - A:I y K se escriben por separado.
