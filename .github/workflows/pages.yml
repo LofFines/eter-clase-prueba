@@ -1,0 +1,58 @@
+# Publica el sitio estático en GitHub Pages.
+# Requisito (una sola vez, desde la web): Settings → Pages → Build and deployment →
+# Source: "GitHub Actions". Sin eso, el paso configure-pages falla con "Not Found".
+name: Publicar en GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Configurar Pages
+        uses: actions/configure-pages@v6
+        with:
+          # Intenta activar Pages si todavía no está activo (con GITHUB_TOKEN suele no alcanzar;
+          # en ese caso hay que activarlo a mano en Settings → Pages).
+          enablement: true
+
+      - name: Armar carpeta pública (sin apps-script ni docs)
+        run: |
+          mkdir -p _site
+          cp index.html confirmacion.html generar.html config.js favicon.svg .nojekyll _site/
+          cp -r assets _site/
+
+      - name: Generar imagen para compartir (og.png desde og.svg)
+        continue-on-error: true
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq librsvg2-bin fonts-dejavu-core
+          rsvg-convert -w 1200 -h 630 assets/og.svg -o _site/assets/og.png
+          ls -la _site/assets/og.png
+
+      - name: Subir artefacto
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - name: Publicar
+        id: deployment
+        uses: actions/deploy-pages@v5
