@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <title>Generar link de clase de prueba · Espacio Éter</title>
+  <meta name="description" content="Herramienta interna de Espacio Éter para armar links de reserva.">
+  <meta name="theme-color" content="#12071f">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Espacio Éter">
+  <meta property="og:title" content="Generador de links · Espacio Éter">
+  <meta property="og:description" content="Herramienta interna para armar el link de la clase de prueba.">
+  <meta property="og:url" content="https://loffines.github.io/eter-clase-prueba/generar.html">
+  <meta property="og:image" content="https://loffines.github.io/eter-clase-prueba/assets/og.png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Saltar al contenido</a>
+  <div class="wrap wrap--wide">
+    <header>
+      <div class="brand">
+        <img src="favicon.svg" alt="" width="40" height="40">
+        <span class="brand__name">Espacio Éter<span class="brand__tag">generador de links · clase de prueba</span></span>
+      </div>
+    </header>
+
+    <main id="main">
+      <h1>Armá el link de la clase</h1>
+      <p class="lead">Elegí la clase, copiá el link o mandalo directo por WhatsApp. La persona lo abre, deja sus datos y paga.</p>
+
+      <form id="form-generar" class="card" novalidate>
+        <fieldset class="chips" id="disciplinas">
+          <legend>Disciplina</legend>
+          <label class="chip"><input type="radio" name="d" value="pole" checked><span>Pole</span></label>
+          <label class="chip"><input type="radio" name="d" value="acro"><span>Acro</span></label>
+          <label class="chip"><input type="radio" name="d" value="flexi"><span>Flexi</span></label>
+          <label class="chip"><input type="radio" name="d" value="danza"><span>Danza</span></label>
+        </fieldset>
+
+        <div class="btn-row btn-row--2">
+          <div class="field">
+            <label for="fecha">Día</label>
+            <input id="fecha" name="f" type="date" required aria-describedby="fecha-error">
+            <p class="field-error" id="fecha-error" role="alert"></p>
+          </div>
+          <div class="field">
+            <label for="hora">Hora</label>
+            <input id="hora" name="h" type="time" step="300" required aria-describedby="hora-error">
+            <p class="field-error" id="hora-error" role="alert"></p>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="origen">¿De dónde vino? <span class="small">(anuncio de origen)</span></label>
+          <select id="origen" name="o" aria-describedby="origen-hint">
+            <option value="">No lo sé / WhatsApp</option>
+            <option>3 segundos</option>
+            <option>salsa</option>
+            <option>bachata</option>
+            <option>comunidad</option>
+            <option>genio</option>
+            <option>Orgánico / IG</option>
+            <option>Recomendación</option>
+            <option>No sabe</option>
+          </select>
+          <span class="hint" id="origen-hint">Son las mismas opciones de la columna “Anuncio de origen” de la planilla.</span>
+        </div>
+
+        <div class="field">
+          <label for="numero">WhatsApp de la persona <span class="small">(opcional)</span></label>
+          <input id="numero" name="numero" type="tel" inputmode="tel" autocomplete="off" maxlength="25"
+            placeholder="Ej.: 11 2345-6789" aria-describedby="numero-hint numero-error">
+          <span class="hint" id="numero-hint">Si lo completás, el botón abre el chat con esa persona. Si no, elegís el contacto en WhatsApp.</span>
+          <p class="field-error" id="numero-error" role="alert"></p>
+        </div>
+      </form>
+
+      <section class="card" aria-labelledby="titulo-resultado" aria-live="polite">
+        <h2 id="titulo-resultado">Link listo</h2>
+        <p class="class-box__what" id="resumen">Completá día y hora.</p>
+        <p class="output" id="link-out">—</p>
+
+        <label for="mensaje">Mensaje para mandar</label>
+        <textarea id="mensaje" rows="5"></textarea>
+        <span class="hint">Podés editarlo antes de mandarlo.</span>
+
+        <div class="btn-row btn-row--2" style="margin-top:1rem">
+          <button class="btn btn--ghost" type="button" id="btn-copiar" disabled>Copiar link</button>
+          <a class="btn btn--wa" id="btn-wa" href="#" aria-disabled="true" rel="noopener">Mandar por WhatsApp</a>
+        </div>
+        <p class="small" style="margin-top:.75rem">
+          <button class="btn btn--ghost btn--small" type="button" id="btn-copiar-msj" disabled>Copiar mensaje completo</button>
+          <a id="btn-probar" href="#" target="_blank" rel="noopener" hidden>Probar el link</a>
+        </p>
+        <p id="copiado" class="notice notice--ok" role="status" hidden>¡Copiado!</p>
+      </section>
+    </main>
+
+    <footer><p>Uso interno de Espacio Éter.</p></footer>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="assets/common.js"></script>
+  <script src="assets/generar.js"></script>
+</body>
+</html>
