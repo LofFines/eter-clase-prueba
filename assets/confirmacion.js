@@ -46,7 +46,8 @@
 
   function vistaOk(res) {
     var clase = claseDe(res && res.reserva);
-    var nombre = (res && res.reserva && res.reserva.nombre) || (guardada && guardada.nombre) || '';
+    // El servidor solo devuelve el primer nombre; si esta pestaña guardó el nombre completo, lo usamos para el WhatsApp.
+    var nombre = (guardada && guardada.nombre) || (res && res.reserva && res.reserva.nombre) || '';
     var primerNombre = nombre ? nombre.split(' ')[0] : '';
     if (primerNombre) E.el('titulo-ok').textContent = '¡Listo, ' + primerNombre + '! Tu lugar está reservado';
     if (clase) {
