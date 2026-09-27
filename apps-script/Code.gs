@@ -27,7 +27,17 @@ var ETER = {
   REF_PREFIX: 'ETER-',
   VENCIMIENTO_HORAS: 48,
   CACHE_TTL: 21600,              // 6 h (máximo de CacheService)
-  DISCIPLINAS: { pole: 'Pole', acro: 'Acro', flexi: 'Flexi', danza: 'Danza' },
+  // slug (parámetro d del link) → nombre exacto que va a la columna E (tiene que coincidir con su lista).
+  DISCIPLINAS: {
+    'pole-sport': 'Pole sport',
+    'pole-coreo': 'Pole coreo',
+    'funcional': 'Funcional',
+    'bachata': 'Bachata',
+    'salsa': 'Salsa',
+    'acro-adultos': 'Acro adultos',
+    'acro-infantil': 'Acro infantil',
+    'flexibilidad': 'Flexibilidad'
+  },
   // Mismas opciones que la validación de datos de la columna D ("Anuncio de origen").
   ORIGENES_VALIDOS: ['3 segundos', 'salsa', 'bachata', 'comunidad', 'genio', 'Orgánico / IG', 'Recomendación', 'No sabe'],
   ORIGEN_SI_NO_COINCIDE: 'No sabe',
@@ -272,7 +282,7 @@ function getSheet_() {
  * Escribe A:I y K por separado; J NO se toca (tiene un ARRAYFORMULA en J2).
  */
 function registrar_(paymentId, datos) {
-  if (!datos || !datos.nombre || !ETER.DISCIPLINAS[datos.disciplina]) {
+  if (!datos || !datos.nombre || !disciplinaValida_(datos.disciplina)) {
     console.error('registrar_: datos incompletos para el pago ' + paymentId);
     return { ok: false, written: false, error: 'datos' };
   }
@@ -348,7 +358,7 @@ function selfTest() {
     reserva_id: nuevaReserva_(),
     nombre: 'Prueba selfTest',
     whatsapp: '5491100000000',
-    disciplina: 'pole',
+    disciplina: 'pole-sport',
     fecha: manana,
     hora: '19:00',
     origen: 'Orgánico / IG'
@@ -416,7 +426,7 @@ function datosDePago_(p) {
     reserva_id: m.reserva_id || p.external_reference || '',
     nombre: m.nombre || '',
     whatsapp: m.whatsapp || '',
-    disciplina: String(m.disciplina || '').toLowerCase(),
+    disciplina: String(m.disciplina || '').trim().toLowerCase(),
     fecha: m.fecha || '',
     hora: m.hora || '',
     origen: m.origen || ''
@@ -436,7 +446,7 @@ function validarReserva_(b) {
   var nombre = String(b.nombre || '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim();
   var origen = String(b.origen || '').replace(/[\u0000-\u001f\u007f<>]/g, '').trim().slice(0, 40) || 'WhatsApp';
 
-  if (!ETER.DISCIPLINAS[disciplina]) return { ok: false, message: 'La disciplina no es válida.' };
+  if (!disciplinaValida_(disciplina)) return { ok: false, message: 'La disciplina no es válida.' };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !fechaReal_(fecha)) return { ok: false, message: 'La fecha no es válida.' };
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(hora)) return { ok: false, message: 'La hora no es válida.' };
   var ahora = Utilities.formatDate(new Date(), ETER.TZ, 'yyyy-MM-dd HH:mm');
@@ -448,6 +458,12 @@ function validarReserva_(b) {
   if (!wa) return { ok: false, message: 'Revisá el WhatsApp (celular argentino con código de área).' };
 
   return { ok: true, datos: { nombre: nombre, whatsapp: wa, disciplina: disciplina, fecha: fecha, hora: hora, origen: origen } };
+}
+
+/** Slug en minúsculas con guiones ("pole-sport") y que exista en ETER.DISCIPLINAS (propio, no heredado). */
+function disciplinaValida_(d) {
+  return typeof d === 'string' && /^[a-z]+(-[a-z]+)*$/.test(d) &&
+    Object.prototype.hasOwnProperty.call(ETER.DISCIPLINAS, d);
 }
 
 function fechaReal_(f) {

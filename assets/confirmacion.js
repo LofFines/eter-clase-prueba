@@ -23,7 +23,7 @@
 
   function claseDe(reserva) {
     var r = reserva || guardada;
-    if (r && E.DISCIPLINAS[r.d] && E.parseFecha(r.f) && E.parseHora(r.h)) return r;
+    if (r && E.esDisciplina(r.d) && E.parseFecha(r.f) && E.parseHora(r.h)) return r;
     return null;
   }
 
@@ -33,7 +33,7 @@
   }
 
   function ajustarPole(clase) {
-    E.show(E.el('item-pole'), !clase || clase.d === 'pole');
+    E.show(E.el('item-pole'), !clase || clase.d === 'pole-sport' || clase.d === 'pole-coreo');
   }
 
   function linkReintento(clase) {

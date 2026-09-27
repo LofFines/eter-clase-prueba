@@ -30,7 +30,7 @@
 
   function disciplina() {
     var r = form.querySelector('input[name="d"]:checked');
-    return r ? r.value : 'pole';
+    return r ? r.value : 'pole-sport';
   }
 
   function armarLink(d, f, h, o) {
@@ -38,9 +38,13 @@
   }
 
   function mensajePara(d, f, h, link) {
-    return '¡Hola! 💜 Te paso el link para reservar tu clase de prueba de ' + E.DISCIPLINAS[d] +
+    var infantil = d === 'acro-infantil';
+    return '¡Hola! 💜 Te paso el link para reservar ' +
+      (infantil ? 'la clase de prueba de ' + E.DISCIPLINAS[d] + ' para tu peque' : 'tu clase de prueba de ' + E.DISCIPLINAS[d]) +
       ' el ' + E.fechaHumana(f) + ' a las ' + h + ' hs en Espacio Éter (San Martín 39, Ciudadela).\n\n' +
-      'Dejás tu nombre y WhatsApp, pagás los $5.000 con Mercado Pago y queda reservado:\n' + link + '\n\n' +
+      (infantil
+        ? 'Completás con tus datos (nombre y WhatsApp, como adulto/a responsable), pagás los $5.000 con Mercado Pago y queda reservado:\n'
+        : 'Dejás tu nombre y WhatsApp, pagás los $5.000 con Mercado Pago y queda reservado:\n') + link + '\n\n' +
       'Si después no podés venir, avisame antes de la clase y la pasamos a otro día sin perder lo que pagaste.';
   }
 

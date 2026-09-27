@@ -38,6 +38,14 @@
   var errorEnvio = E.el('error-envio');
   var TEXTO_BTN = btnTexto.textContent;
 
+  // Acro infantil: el formulario lo completa el/la adulto/a responsable (la planilla no cambia).
+  if (clase.d === 'acro-infantil') {
+    E.show(E.el('nota-infantil'), true);
+    E.el('label-nombre').textContent = 'Tu nombre (adulto/a responsable)';
+    E.el('label-whatsapp').textContent = 'Tu WhatsApp';
+    inNombre.setAttribute('aria-describedby', 'nota-infantil nombre-error');
+  }
+
   function setFieldError(input, msg) {
     var box = E.el(input.id + '-error');
     box.textContent = msg || '';

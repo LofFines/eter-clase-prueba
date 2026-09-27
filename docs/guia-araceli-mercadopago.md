@@ -60,7 +60,7 @@ En la tabla vas a ver el **usuario**, la **contraseña** y un **código de verif
 Cuando todo esté probado, se activan las credenciales de producción:
 
 1. **Tus integraciones** → tu aplicación → **Credenciales de producción** (menú de la izquierda).
-2. **Industria**: elegí el rubro del estudio (el que mejor describa clases de pole, acro, flexi y danza; por ejemplo, algo de deportes/fitness o educación).
+2. **Industria**: elegí el rubro del estudio (el que mejor describa clases de pole, acro, funcional, flexibilidad y ritmos latinos; por ejemplo, algo de deportes/fitness o educación).
 3. **Sitio web** (obligatorio): **https://loffines.github.io/eter-clase-prueba/**
 4. Aceptá la *Declaración de Privacidad* y los *Términos y condiciones*, completá el “No soy un robot” y tocá **Activar credenciales de producción**.
 

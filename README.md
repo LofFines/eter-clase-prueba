@@ -13,7 +13,7 @@ Landing estática para que una persona que ya coordinó por WhatsApp con Araceli
 ## Arquitectura
 
 ```
-Araceli (WhatsApp) ──► generar.html ──► link: /?d=pole&f=2026-10-02&h=19:00&o=salsa
+Araceli (WhatsApp) ──► generar.html ──► link: /?d=pole-sport&f=2026-10-02&h=19:00&o=salsa
                                               │
 Persona ──► index.html (ve su clase, deja nombre + WhatsApp)
               │  POST text/plain {action:"create", ...}      (sin preflight CORS)
@@ -34,7 +34,7 @@ Persona ──► index.html (ve su clase, deja nombre + WhatsApp)
 | Archivo | Qué hace |
 |---|---|
 | `assets/og.svg` | Imagen para compartir (Open Graph). El workflow la convierte a `og.png` al publicar (WhatsApp/Facebook no leen SVG). |
-| `index.html` + `assets/reserva.js` | Lee `d` (pole\|acro\|flexi\|danza), `f` (YYYY-MM-DD), `h` (HH:mm), `o` (origen, opcional; default `WhatsApp`). Muestra “Pole · viernes 2 de octubre · 19:00 hs”, valida nombre y celular argentino, llama a `create` y redirige al `init_point`. Si el link está incompleto, vencido o es inválido, ofrece pedir otro por WhatsApp. |
+| `index.html` + `assets/reserva.js` | Lee `d` (slug de la disciplina: `pole-sport`, `pole-coreo`, `funcional`, `bachata`, `salsa`, `acro-adultos`, `acro-infantil`, `flexibilidad`; un slug viejo o desconocido cae en “link inválido”), `f` (YYYY-MM-DD), `h` (HH:mm), `o` (origen, opcional; default `WhatsApp`). Muestra “Pole sport · viernes 2 de octubre · 19:00 hs”, en `acro-infantil` aclara que completa el/la adulto/a responsable, valida nombre y celular argentino, llama a `create` y redirige al `init_point`. Si el link está incompleto, vencido o es inválido, ofrece pedir otro por WhatsApp. |
 | `confirmacion.html` + `assets/confirmacion.js` | `back_url` de MP. Lee `payment_id`, `status`, `external_reference`, llama a `verify` y muestra aprobado / pendiente / rechazado / no pagó. Incluye dirección, Google Maps, qué traer, política de reprogramación y botón a WhatsApp. |
 | `generar.html` + `assets/generar.js` | Herramienta para Araceli: disciplina, día, hora, origen → link listo, “Copiar” y “Mandar por WhatsApp” (con o sin número). |
 | `config.js` | `SCRIPT_URL` (URL `/exec` de la app web) y `SITE_URL`. |
@@ -53,7 +53,7 @@ Solapa buscada **por sheetId `934024988`** (no por nombre). Encabezados en la fi
 | B | Nombre | Nombre |
 | C | WhatsApp | Texto (`@`), p. ej. `+54 9 11 2397-8429` |
 | D | Anuncio de origen | Valor de la lista de la columna (`3 segundos`, `salsa`, `bachata`, `comunidad`, `genio`, `Orgánico / IG`, `Recomendación`, `No sabe`). Si el origen no está en la lista (p. ej. el default `WhatsApp`) se anota `No sabe` y el valor original va a Notas. |
-| E | Disciplina | `Pole` / `Acro` / `Flexi` / `Danza` |
+| E | Disciplina | Nombre exacto según el slug: `Pole sport` / `Pole coreo` / `Funcional` / `Bachata` / `Salsa` / `Acro adultos` / `Acro infantil` / `Flexibilidad` (mismas opciones que la lista de la columna). En `Acro infantil`, B y C son los datos del/de la adulto/a responsable. |
 | F | Día y hora de la clase | **Fecha-hora como número de serie** (formato `dd/mm HH:mm`; se ve como `02/10 19:00`). Tiene que ser número porque la fórmula de J lo usa. Se escribe como serial calculado desde la hora de Argentina, no como objeto `Date`, para que no dependa de la zona horaria de la planilla y Sheets no reemplace el formato. |
 | G | ¿Confirmó? | `Sí` |
 | H, I | ¿Vino? / ¿Volvió? | vacías |
@@ -135,6 +135,6 @@ El workflow `.github/workflows/pages.yml` publica en cada push a `main`. **Requi
 
 ```bash
 python3 -m http.server 8000
-# http://localhost:8000/?d=pole&f=2026-10-02&h=19:00
+# http://localhost:8000/?d=pole-sport&f=2026-10-02&h=19:00
 ```
 Sin `SCRIPT_URL` configurada, el botón de pago avisa que la reserva online no está activa y deriva a WhatsApp.

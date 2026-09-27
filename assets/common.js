@@ -3,7 +3,17 @@
   'use strict';
 
   var TZ = 'America/Argentina/Buenos_Aires';
-  var DISCIPLINAS = { pole: 'Pole', acro: 'Acro', flexi: 'Flexi', danza: 'Danza' };
+  // slug (va en el link ?d=) → nombre exacto (es el que se anota en la columna E de la planilla).
+  var DISCIPLINAS = {
+    'pole-sport': 'Pole sport',
+    'pole-coreo': 'Pole coreo',
+    'funcional': 'Funcional',
+    'bachata': 'Bachata',
+    'salsa': 'Salsa',
+    'acro-adultos': 'Acro adultos',
+    'acro-infantil': 'Acro infantil',
+    'flexibilidad': 'Flexibilidad'
+  };
   var DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
   var MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
     'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -14,6 +24,12 @@
   var MAPS_URL = 'https://www.google.com/maps/search/?api=1&query=' +
     encodeURIComponent('San Martín 39, Ciudadela, Buenos Aires, Argentina');
   var PRECIO_TEXTO = '$5.000';
+
+  /** true solo si el slug es una disciplina propia del mapa (nada de "constructor", "toString", etc.). */
+  function esDisciplina(d) {
+    return typeof d === 'string' && /^[a-z]+(-[a-z]+)*$/.test(d) &&
+      Object.prototype.hasOwnProperty.call(DISCIPLINAS, d);
+  }
 
   function waLink(texto, numero) {
     var base = 'https://wa.me/' + (numero === undefined ? WA_NUMERO : (numero || ''));
@@ -62,15 +78,15 @@
     return DIAS[p.dow] + ' ' + p.d + ' de ' + MESES[p.m - 1];
   }
 
-  /** "Pole · viernes 2 de octubre · 19:00 hs" */
+  /** "Pole sport · viernes 2 de octubre · 19:00 hs" */
   function claseHumana(d, f, h) {
-    return (DISCIPLINAS[d] || d) + ' · ' + fechaHumana(f) + ' · ' + h + ' hs';
+    return (esDisciplina(d) ? DISCIPLINAS[d] : d) + ' · ' + fechaHumana(f) + ' · ' + h + ' hs';
   }
 
   /** Revisa los parámetros de la clase. Devuelve {ok, motivo, clase}. */
   function validarClase(d, f, h) {
     d = (d || '').toLowerCase().trim();
-    if (!DISCIPLINAS[d]) return { ok: false, motivo: 'disciplina' };
+    if (!esDisciplina(d)) return { ok: false, motivo: 'disciplina' };
     if (!parseFecha(f)) return { ok: false, motivo: 'fecha' };
     if (!parseHora(h)) return { ok: false, motivo: 'hora' };
     if ((f + ' ' + h) < ahoraArgentina()) return { ok: false, motivo: 'pasada' };
@@ -131,7 +147,7 @@
   }
 
   global.Eter = {
-    TZ: TZ, DISCIPLINAS: DISCIPLINAS, WA_NUMERO: WA_NUMERO, WA_VISIBLE: WA_VISIBLE,
+    TZ: TZ, DISCIPLINAS: DISCIPLINAS, esDisciplina: esDisciplina, WA_NUMERO: WA_NUMERO, WA_VISIBLE: WA_VISIBLE,
     DIRECCION: DIRECCION, MAPS_URL: MAPS_URL, PRECIO_TEXTO: PRECIO_TEXTO,
     waLink: waLink, parseFecha: parseFecha, parseHora: parseHora, fechaHumana: fechaHumana,
     claseHumana: claseHumana, validarClase: validarClase, normalizarCelular: normalizarCelular,

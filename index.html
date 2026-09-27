@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="robots" content="noindex, nofollow">
   <title>Reservá tu clase de prueba · Espacio Éter</title>
-  <meta name="description" content="Reservá y pagá tu clase de prueba en Espacio Éter, Ciudadela. Pole, acro, flexi y danza. Un refugio para entrenar sin prejuicios.">
+  <meta name="description" content="Reservá y pagá tu clase de prueba en Espacio Éter, Ciudadela. Pole, acro, funcional, flexibilidad y ritmos latinos. Un refugio para entrenar sin prejuicios.">
   <meta name="theme-color" content="#12071f">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="es_AR">
   <meta property="og:site_name" content="Espacio Éter">
   <meta property="og:title" content="Tu clase de prueba en Espacio Éter">
-  <meta property="og:description" content="Reservá tu lugar y pagá con Mercado Pago. Pole, acro, flexi y danza en Ciudadela: un refugio para entrenar sin prejuicios.">
+  <meta property="og:description" content="Reservá tu lugar y pagá con Mercado Pago. Pole, acro, funcional, flexibilidad y ritmos latinos en Ciudadela: un refugio para entrenar sin prejuicios.">
   <meta property="og:url" content="https://loffines.github.io/eter-clase-prueba/">
   <meta property="og:image" content="https://loffines.github.io/eter-clase-prueba/assets/og.png">
   <meta property="og:image:width" content="1200">
@@ -63,14 +63,17 @@
         </div>
 
         <form id="form-reserva" class="card" novalidate>
+          <div class="notice notice--info" id="nota-infantil" hidden>
+            <p>La clase es para un/a peque: completá con tus datos, como adulto/a responsable.</p>
+          </div>
           <div class="field">
-            <label for="nombre">Tu nombre</label>
+            <label for="nombre" id="label-nombre">Tu nombre</label>
             <input id="nombre" name="nombre" type="text" autocomplete="name" required minlength="2" maxlength="60"
               aria-describedby="nombre-error" placeholder="Ej.: Sofi Gómez">
             <p class="field-error" id="nombre-error" role="alert"></p>
           </div>
           <div class="field">
-            <label for="whatsapp">Tu WhatsApp</label>
+            <label for="whatsapp" id="label-whatsapp">Tu WhatsApp</label>
             <input id="whatsapp" name="whatsapp" type="tel" inputmode="tel" autocomplete="tel-national" required maxlength="25"
               aria-describedby="whatsapp-hint whatsapp-error" placeholder="Ej.: 11 2345-6789">
             <span class="hint" id="whatsapp-hint">Celular con código de área, sin el 0 ni el 15 (igual lo corregimos si lo ponés).</span>
