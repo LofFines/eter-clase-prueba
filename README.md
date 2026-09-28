@@ -55,12 +55,13 @@ Solapa buscada **por sheetId `934024988`** (no por nombre). Encabezados en la fi
 | D | Anuncio de origen | Valor de la lista de la columna (`3 segundos`, `salsa`, `bachata`, `comunidad`, `genio`, `Orgánico / IG`, `Recomendación`, `No sabe`). Si el origen no está en la lista (p. ej. el default `WhatsApp`) se anota `No sabe` y el valor original va a Notas. |
 | E | Disciplina | Nombre exacto según el slug: `Pole sport` / `Pole coreo` / `Funcional` / `Bachata` / `Salsa` / `Acro adultos` / `Acro infantil` / `Flexibilidad` (mismas opciones que la lista de la columna). En `Acro infantil`, B y C son los datos del/de la adulto/a responsable. |
 | F | Día y hora de la clase | **Fecha-hora como número de serie** (formato `dd/mm HH:mm`; se ve como `02/10 19:00`). Tiene que ser número porque la fórmula de J lo usa. Se escribe como serial calculado desde la hora de Argentina, no como objeto `Date`, para que no dependa de la zona horaria de la planilla y Sheets no reemplace el formato. |
-| G | ¿Confirmó? | `Sí` |
+| G | ¿Confirmó? | `Sí` (en `MODE=mock`: `PRUEBA`, nunca `Sí`) |
 | H, I | ¿Vino? / ¿Volvió? | vacías |
 | J | Semana | **No se toca**: `J2` tiene un ARRAYFORMULA: `=ARRAYFORMULA(IF(ISNUMBER(F2:F);INT(F2:F)-WEEKDAY(F2:F;3);""))` que llena toda la columna (J2:J1000 está protegido con advertencia). |
-| K | Notas | `Pagó $5.000 MP · id <payment_id>` |
+| K | Notas | `Pagó $5.000 MP · id <payment_id>` (en mock: `PRUEBA (mock), no se cobró · id MOCK-…`) |
 
 - A:I y K se escriben por separado.
+- **Anti fórmulas**: todo texto libre (nombre, WhatsApp, origen, notas) pasa por `textoPlanilla_()`: saca caracteres invisibles y, si empieza con `=` `+` `-` `@` tab, `\r` o `'`, le antepone un apóstrofo (Sheets lo guarda como texto). El nombre tiene que tener al menos una letra.
 - Fila destino: la **primera fila vacía** (A y B vacías y sin nada en C:I ni K, para no pisar una fila a medio cargar). No se usa `getLastRow()` porque el ARRAYFORMULA de J y el panel de resumen de M:Q llegan hasta la fila 1000.
 - **Idempotente**: si `id <payment_id>` ya está en K, no duplica. Todo dentro de `LockService`.
 
@@ -77,11 +78,14 @@ Solapa buscada **por sheetId `934024988`** (no por nombre). Encabezados en la fi
 
    | Propiedad | Valor |
    |---|---|
-   | `MODE` | `mock` (para empezar) |
+   | `MODE` | **Obligatorio y exacto** (minúsculas): `mock`, `sandbox` o `production`. Si falta o es otra cosa, el script no procesa nada (responde `ok:false`, `error:"config"` y lo loguea). |
+   | `MOCK_SHEET_ID` | **Obligatorio en mock**: id de la copia PRUEBA. Mock solo funciona si la planilla que usa el script (`SHEET_ID` o la contenedora) es exactamente esa. |
    | `SITE_URL` | `https://loffines.github.io/eter-clase-prueba/` |
    | `WEBAPP_URL` | (la completás en el paso 6) |
    | `SHEET_ID` | opcional; vacío = usa la planilla donde está pegado el script |
    | `MP_ACCESS_TOKEN` | **solo** cuando pases a sandbox; en mock no hace falta |
+   | `WEBHOOK_KEY` | sandbox/producción: secreto largo al azar. Va en `notification_url` como `&k=…`; sin él no se manda `notification_url` (queda `reconcile`) y toda notificación se descarta. |
+   | `MP_COLLECTOR_ID` | opcional (recomendado): user id de la cuenta de MP que cobra; un pago de otra cuenta no se acepta. |
 
 5. **Implementar → Nueva implementación → tipo “Aplicación web”**: *Ejecutar como*: **Yo**; *Quién tiene acceso*: **Cualquier persona**. Autorizá los permisos (planilla, conexiones externas, triggers).
 6. Copiá la URL que termina en `/exec`:
@@ -98,20 +102,20 @@ Solapa buscada **por sheetId `934024988`** (no por nombre). Encabezados en la fi
 ## De mock → sandbox → producción
 
 ### 1) Mock (actual)
-`MODE=mock`. `create` no llama a MP: devuelve un `init_point` a `confirmacion.html?payment_id=MOCK-<timestamp>&status=approved&external_reference=…`. `verify` acepta `MOCK-*` solo si coincide con lo guardado en el `create` (CacheService, 6 h). `reconcile` y los webhooks no hacen nada.
+`MODE=mock` + `MOCK_SHEET_ID`. `create` no llama a MP: devuelve un `init_point` a `confirmacion.html?payment_id=MOCK-<UUID>&status=approved&external_reference=ETER-…`. `verify` acepta `MOCK-*` solo si la `external_reference` coincide con lo guardado en el `create` (CacheService, 6 h). La fila lleva `PRUEBA` en G. `reconcile` y los webhooks no hacen nada.
 
-⚠️ En mock cualquiera que abra la landing puede generar una fila de prueba: **usalo solo sobre la copia PRUEBA**, no con el script instalado en la planilla real.
+⚠️ En mock cualquiera que abra la landing puede generar una fila de prueba: por eso mock **solo funciona si la planilla es la de `MOCK_SHEET_ID`** (la copia PRUEBA); instalado en la planilla real, el script se niega.
 
 ### 2) Sandbox (cuentas de prueba de MP)
 1. Araceli crea la aplicación y cuentas de prueba siguiendo `docs/guia-araceli-mercadopago.md`.
 2. El **Access Token de prueba** se carga en `MP_ACCESS_TOKEN` por el canal seguro que coordina Leandro (nunca por chat, nunca en el repo, nunca en `config.js`).
-3. `MODE=sandbox`. `create` devuelve `sandbox_init_point` (si MP no lo manda, usa `init_point`).
+3. `MODE=sandbox` y `WEBHOOK_KEY` (y, si lo tenés, `MP_COLLECTOR_ID`). `create` devuelve `sandbox_init_point` (si MP no lo manda, usa `init_point`). En sandbox solo se aceptan pagos con `live_mode=false`.
 4. Probar en ventana de incógnito, logueado como **comprador de prueba**, con las tarjetas de prueba de MP (titular `APRO` = aprobado, `OTHE` = rechazado, `CONT` = pendiente).
 5. Verificar: fila anotada, reintento de `confirmacion.html` sin duplicar, webhook y `reconcile` (dejá pasar 15 min con un pago cuyo `verify` no se haya llamado).
 
 ### 3) Producción (no activar todavía)
 1. Araceli activa las credenciales de producción (rubro + sitio `https://loffines.github.io/eter-clase-prueba/`).
-2. Reemplazar `MP_ACCESS_TOKEN` por el de producción y `MODE=production`.
+2. Reemplazar `MP_ACCESS_TOKEN` por el de producción, `MODE=production` (solo se aceptan pagos con `live_mode=true`) y revisar `WEBHOOK_KEY` / `MP_COLLECTOR_ID`.
 3. Instalar el script en la planilla real (o `SHEET_ID` apuntando a ella) y crear una nueva versión de la implementación.
 4. Sacar `noindex` de las páginas cuando se quiera (opcional; `generar.html` conviene dejarlo con `noindex`).
 
@@ -120,10 +124,14 @@ Solapa buscada **por sheetId `934024988`** (no por nombre). Encabezados en la fi
 ## Seguridad y decisiones
 
 - **Precio y moneda fijos del lado del servidor** (`unit_price: 5000`, `currency_id: "ARS"`). El navegador solo manda nombre, WhatsApp, disciplina, fecha, hora y origen, que se validan en el servidor.
-- **Una fila solo se escribe con un pago verificado** consultando `GET /v1/payments/{id}` con el token: `status=approved`, `transaction_amount=5000`, `currency_id=ARS` y `external_reference` que empieza con `ETER-` (así no se anotan otros cobros de $5.000 de la cuenta). Los datos de la fila salen de la `metadata` del pago, no de lo que manda el navegador.
-- Apps Script no puede leer headers, así que **no se valida la firma `x-signature`** del webhook; en su lugar, cada notificación se re-consulta a la API con el token (una notificación falsa no puede anotar nada).
+- **Falla cerrado**: `MODE` inválido o faltante, o mock fuera de la planilla `MOCK_SHEET_ID` → `ok:false` (`error:"config"`) en create / verify / webhook / reconcile, y no se escribe nada.
+- **Una fila solo se escribe con un pago verificado** consultando `GET /v1/payments/{id}` con el token: `status=approved`, `transaction_amount=5000`, `currency_id=ARS`, `external_reference` que empieza con `ETER-` (así no se anotan otros cobros de $5.000 de la cuenta), `live_mode` acorde al modo (`true` solo en production) y, si está `MP_COLLECTOR_ID`, `collector_id` igual. Los datos de la fila salen de la `metadata` del pago, no de lo que manda el navegador.
+- `verify` exige que la `external_reference` que manda el navegador empiece con `ETER-` y sea **igual** a la del pago antes de devolver cualquier dato.
+- Apps Script no puede leer headers, así que **no se valida la firma `x-signature`** del webhook; en su lugar la `notification_url` lleva `&k=<WEBHOOK_KEY>` (lo que no trae esa clave se descarta sin llamar a MP) y cada notificación se re-consulta a la API con el token (una notificación falsa no puede anotar nada). Webhooks configurados a mano en el panel de MP (sin `k`) se descartan.
+- El front solo redirige a `https://www.mercadopago.com.ar/` o `https://sandbox.mercadopago.com.ar/` (o, en mock, a la `confirmacion.html` del mismo sitio) y solo muestra “¡Listo!” si el servidor confirma aprobado + anotado; si no, “Estamos verificando tu pago”.
+- Aviso de privacidad (Ley 25.326, art. 6, y Disposición AAIP 10/2008) visible debajo del botón de pago.
 - Apps Script responde a los POST con una redirección 302; MP puede reintentar la notificación. No pasa nada: la escritura es idempotente y `reconcile` cubre cualquier notificación perdida.
-- El token nunca se loguea ni se devuelve. `doGet` solo informa `mode` y si hay token cargado (sí/no).
+- El token nunca se loguea ni se devuelve. `doGet` responde solo `{"ok":true}`.
 - `confirmacion.html` devuelve solo el primer nombre y los datos de la clase; nunca el teléfono.
 - Vencimiento de la preferencia: 48 h.
 

@@ -10,7 +10,7 @@
   var guardada = null;
   try { guardada = JSON.parse(sessionStorage.getItem('eter_reserva') || 'null'); } catch (e) { guardada = null; }
 
-  var VISTAS = ['vista-cargando', 'vista-ok', 'vista-ok-sin-verificar', 'vista-pendiente', 'vista-rechazado', 'vista-error'];
+  var VISTAS = ['vista-cargando', 'vista-ok', 'vista-verificando', 'vista-pendiente', 'vista-rechazado', 'vista-error'];
   var intentos = 0;
 
   function mostrar(id, conInfo) {
@@ -63,14 +63,21 @@
     mostrar('vista-ok', true);
   }
 
-  function vistaOkSinVerificar() {
+  /**
+   * El servidor no confirmó el pago (no lo encuentra, falta/no coincide la referencia, error, sin conexión).
+   * Nunca mostramos el texto de éxito: solo "estamos verificando" + WhatsApp.
+   */
+  function vistaVerificando() {
     var clase = claseDe(null);
-    E.el('operacion-osv').textContent = paymentId || '—';
-    ajustarPole(clase);
-    setWa('Hola Araceli! Pagué la clase de prueba' +
+    var opValida = /^(MOCK-[A-Z0-9-]{1,60}|\d{1,20})$/.test(paymentId);
+    E.el('operacion-verif').textContent = opValida ? paymentId : '';
+    E.show(E.el('operacion-verif-wrap'), opValida);
+    E.show(E.el('banner-mock'), false);
+    setWa('Hola Araceli! Hice el pago de la clase de prueba' +
       (clase ? ' (' + E.claseHumana(clase.d, clase.f, clase.h) + ')' : '') +
-      '. Operación ' + paymentId + '.', 'Avisarle a Araceli por WhatsApp');
-    mostrar('vista-ok-sin-verificar', true);
+      ' y la página me dice que lo están verificando' + (opValida ? '. Operación ' + paymentId : '') + '. ¿Me confirmás?',
+      'Escribinos por WhatsApp');
+    mostrar('vista-verificando', false);
   }
 
   function vistaPendiente(res) {
@@ -105,12 +112,13 @@
     mostrar('vista-error', false);
   }
 
-  /** Cuando no se puede verificar, usamos lo que dice la URL (solo para mostrar, nunca para anotar). */
+  /**
+   * Cuando el servidor no confirma, la URL solo sirve para ofrecer reintentar si el pago no salió.
+   * Un "approved" (o cualquier otra cosa) en la URL nunca se muestra como éxito: queda "verificando".
+   */
   function segunQuery() {
-    if (statusQuery === 'approved') return vistaOkSinVerificar();
-    if (statusQuery === 'pending' || statusQuery === 'in_process') return vistaPendiente(null);
     if (statusQuery === 'rejected' || statusQuery === 'cancelled' || statusQuery === 'null') return vistaRechazado(null, statusQuery === 'null');
-    return vistaError();
+    return vistaVerificando();
   }
 
   function verificar() {
@@ -120,16 +128,17 @@
       .then(function (res) {
         if (res && res.ok) {
           var st = String(res.status || '').toLowerCase();
-          if (st === 'approved') return vistaOk(res);
+          // Éxito SOLO si el servidor dice aprobado y anotado.
+          if (st === 'approved' && res.registrado === true) return vistaOk(res);
           if (st === 'pending' || st === 'in_process' || st === 'authorized' || st === 'in_mediation') return vistaPendiente(res);
           if (st === 'rejected' || st === 'cancelled' || st === 'refunded' || st === 'charged_back') return vistaRechazado(res, false);
-          return vistaError();
+          return vistaVerificando(); // aprobado sin anotar, estado desconocido, etc.
         }
         var err = res && res.error;
         // Mercado Pago a veces tarda unos segundos en mostrar el pago: reintentamos solos.
         if (err === 'not_found' && intentos < 4) { setTimeout(verificar, 3000); return; }
-        if (err === 'not_found' || err === 'config' || err === 'internal') return segunQuery();
-        return vistaError((res && res.message) || null);
+        // no encontrado, falta/no coincide la referencia, config, error interno, etc.
+        return segunQuery();
       })
       .catch(function () {
         if (intentos < 2) { setTimeout(verificar, 2000); return; }
@@ -138,7 +147,7 @@
   }
 
   E.el('btn-reintentar').addEventListener('click', function () { intentos = 0; verificar(); });
-  E.el('btn-reintentar-osv').addEventListener('click', function () { intentos = 0; verificar(); });
+  E.el('btn-reintentar-verif').addEventListener('click', function () { intentos = 0; verificar(); });
 
   // --- Arranque ---
   if (!paymentId || paymentId === 'null') {
@@ -146,6 +155,9 @@
   } else if (!/^(MOCK-[A-Z0-9-]+|\d{1,20})$/.test(paymentId)) {
     vistaError('El número de operación que vino en el link no es válido.');
   } else if (!E.scriptConfigurado()) {
+    segunQuery();
+  } else if (ref.indexOf('ETER-') !== 0) {
+    // Sin la referencia de la reserva el servidor no confirma nada.
     segunQuery();
   } else {
     verificar();

@@ -145,6 +145,13 @@ input[aria-invalid="true"] { border-color: var(--err); }
 .small { font-size: .9rem; color: var(--muted); }
 .center { text-align: center; }
 
+/* Aviso de privacidad (Ley 25.326): visible, chico y discreto, debajo del botón de pago. */
+.privacidad { margin-top: 1rem; padding-top: .85rem; border-top: 1px solid rgba(196,166,255,.18); color: var(--muted); font-size: .76rem; line-height: 1.45; }
+.privacidad p { margin: 0 0 .5rem; }
+.privacidad p:last-child { margin-bottom: 0; }
+.privacidad strong { color: var(--text); font-weight: 600; }
+.privacidad a { color: var(--lilac); }
+
 .chips { display: flex; flex-wrap: wrap; gap: .5rem; border: 0; padding: 0; margin: 0 0 1rem; }
 .chips legend { font-weight: 600; margin-bottom: .45rem; padding: 0; }
 .chip { position: relative; }

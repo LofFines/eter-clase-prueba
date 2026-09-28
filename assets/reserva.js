@@ -52,10 +52,16 @@
     input.setAttribute('aria-invalid', msg ? 'true' : 'false');
   }
 
+  // Al menos una letra (cualquier alfabeto, con tildes y ñ); mismo criterio que el servidor.
+  var LETRA = (function () {
+    try { return new RegExp('\\p{L}', 'u'); } catch (e) { return /[A-Za-zÀ-ÖØ-öø-ÿÑñ]/; }
+  })();
+  var INVISIBLES = /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u00AD\u061C\u180E]/g;
+
   function validarNombre() {
-    var v = inNombre.value.replace(/\s+/g, ' ').trim();
+    var v = inNombre.value.replace(INVISIBLES, '').replace(/\s+/g, ' ').trim();
     if (v.length < 2) { setFieldError(inNombre, 'Contanos tu nombre (al menos 2 letras).'); return null; }
-    if (!/[A-Za-zÀ-ÿ]/.test(v)) { setFieldError(inNombre, 'Revisá el nombre, parece que no tiene letras.'); return null; }
+    if (!LETRA.test(v)) { setFieldError(inNombre, 'Escribí tu nombre con letras, así sabemos cómo llamarte (por ejemplo, Sofi).'); return null; }
     setFieldError(inNombre, '');
     return v.slice(0, 60);
   }
@@ -95,6 +101,22 @@
     btnTexto.textContent = si ? 'Preparando el pago…' : TEXTO_BTN;
   }
 
+  /**
+   * Solo redirigimos a Mercado Pago (www o sandbox). En modo prueba (mock) el servidor manda a
+   * nuestra propia confirmacion.html: eso se acepta solo si coincide con este mismo sitio.
+   */
+  function initPointPermitido(res) {
+    var u = String((res && res.init_point) || '');
+    if (/[\s\\]/.test(u)) return false;
+    if (u.indexOf('https://www.mercadopago.com.ar/') === 0 || u.indexOf('https://sandbox.mercadopago.com.ar/') === 0) return true;
+    if (res && res.mode === 'mock') {
+      var carpeta = window.location.pathname.replace(/[^\/]*$/, ''); // "/eter-clase-prueba/"
+      var propia = window.location.origin + carpeta + 'confirmacion.html?';
+      return u.indexOf(propia) === 0;
+    }
+    return false;
+  }
+
   function waAyuda(nombre) {
     return E.waLink('Hola Araceli! ' + (nombre ? 'Soy ' + nombre + '. ' : '') +
       'Quise pagar la clase de prueba (' + claseTexto + ') desde la web pero no me dejó. ¿Me ayudás?');
@@ -130,12 +152,19 @@
     } catch (e) { /* modo privado: no pasa nada */ }
 
     E.llamarScript(payload, 25000).then(function (res) {
-      if (res && res.ok && res.init_point && /^https:\/\//.test(res.init_point)) {
+      if (res && res.ok && res.init_point && initPointPermitido(res)) {
         btnTexto.textContent = 'Te llevamos a Mercado Pago…';
         window.location.assign(res.init_point);
         return;
       }
       cargando(false);
+      if (res && res.ok && res.init_point) {
+        // Respuesta con un link de pago que no es de Mercado Pago: no redirigimos.
+        mostrarError('<p>Recibimos un link de pago que no reconocemos, así que por seguridad no te llevamos ahí. ' +
+          'No se te cobró nada. Escribinos y te ayudamos a reservar.</p>' +
+          '<p><a href="' + waAyuda(nombre) + '" rel="noopener">Pedir ayuda por WhatsApp</a></p>');
+        return;
+      }
       var msg = (res && res.message) ? res.message : 'No pudimos preparar el pago.';
       mostrarError('<p>' + escapeHtml(msg) + ' Probá de nuevo en un ratito o escribinos.</p>' +
         '<p><a href="' + waAyuda(nombre) + '" rel="noopener">Pedir ayuda por WhatsApp</a></p>');

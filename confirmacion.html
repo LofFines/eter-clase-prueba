@@ -53,12 +53,14 @@
         </div>
       </section>
 
-      <!-- Aprobado según Mercado Pago, pero no pudimos verificar todavía -->
-      <section id="vista-ok-sin-verificar" hidden aria-labelledby="titulo-osv">
+      <!-- El servidor todavía no confirmó el pago (no lo encuentra, falta la referencia, error, etc.).
+           Nunca se muestra como éxito: solo el servidor puede confirmar la reserva. -->
+      <section id="vista-verificando" hidden aria-labelledby="titulo-verif">
         <p class="status-icon" aria-hidden="true">🌙</p>
-        <h1 id="titulo-osv" tabindex="-1">Mercado Pago nos avisó que tu pago salió bien</h1>
-        <p class="lead">Estamos terminando de anotarte. Si en un rato no te escribimos, mandanos un WhatsApp con tu número de operación: <strong id="operacion-osv"></strong>.</p>
-        <button class="btn btn--ghost" type="button" id="btn-reintentar-osv">Volver a chequear</button>
+        <h1 id="titulo-verif" tabindex="-1">Estamos verificando tu pago</h1>
+        <p class="lead">Todavía no pudimos confirmarlo con Mercado Pago. A veces tarda unos minutos: si ya pagaste, quedate tranqui, el pago no se pierde.</p>
+        <p class="lead" id="texto-verif-wa">Si en un rato no se confirma, escribinos por WhatsApp<span id="operacion-verif-wrap"> con tu número de operación: <strong id="operacion-verif"></strong></span> y lo revisamos.</p>
+        <p><button class="btn btn--ghost" type="button" id="btn-reintentar-verif">Volver a chequear</button></p>
       </section>
 
       <!-- Pendiente -->
@@ -84,7 +86,7 @@
         <p><button class="btn btn--ghost" type="button" id="btn-reintentar">Volver a chequear</button></p>
       </section>
 
-      <!-- Info útil (se muestra en aprobado / pendiente / aprobado sin verificar) -->
+      <!-- Info útil (se muestra en aprobado / pendiente) -->
       <section id="info-clase" hidden aria-label="Información para tu clase">
         <div class="card">
           <h2>📍 Dónde</h2>
