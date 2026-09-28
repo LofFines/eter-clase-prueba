@@ -1,0 +1,13 @@
+{
+  "name": "eter-clase-prueba-tests",
+  "private": true,
+  "description": "Pruebas locales: backend (Code.gs simulado) y front en Chrome headless.",
+  "scripts": {
+    "test": "node harness.js && node front.js",
+    "test:backend": "node harness.js",
+    "test:front": "node front.js"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

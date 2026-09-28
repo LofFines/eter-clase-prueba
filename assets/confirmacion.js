@@ -67,8 +67,10 @@
    * El servidor no confirmó el pago (no lo encuentra, falta/no coincide la referencia, error, sin conexión).
    * Nunca mostramos el texto de éxito: solo "estamos verificando" + WhatsApp.
    */
-  function vistaVerificando() {
+  function vistaVerificando(extra) {
     var clase = claseDe(null);
+    E.el('texto-verif-extra').textContent = extra || '';
+    E.show(E.el('texto-verif-extra'), !!extra);
     var opValida = /^(MOCK-[A-Z0-9-]{1,60}|\d{1,20})$/.test(paymentId);
     E.el('operacion-verif').textContent = opValida ? paymentId : '';
     E.show(E.el('operacion-verif-wrap'), opValida);
@@ -135,6 +137,10 @@
           return vistaVerificando(); // aprobado sin anotar, estado desconocido, etc.
         }
         var err = res && res.error;
+        // Demasiados pedidos: nada de reintentos automáticos; "verificando" + volver a chequear más tarde.
+        if (err === 'rate_limited') {
+          return vistaVerificando('Hay muchos pedidos en este momento. Tocá "Volver a chequear" en unos minutos.');
+        }
         // Mercado Pago a veces tarda unos segundos en mostrar el pago: reintentamos solos.
         if (err === 'not_found' && intentos < 4) { setTimeout(verificar, 3000); return; }
         // no encontrado, falta/no coincide la referencia, config, error interno, etc.

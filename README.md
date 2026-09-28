@@ -89,6 +89,17 @@ Solapa buscada **por sheetId `934024988`** (no por nombre). Encabezados en la fi
    | `SITE_URL` | `https://loffines.github.io/eter-clase-prueba/` | ídem | ídem |
    | `SHEET_ID` | opcional; vacío = usa la planilla donde está pegado el script | ídem | ídem |
 
+   Límites de pedidos (opcionales; entero de 1 a 100000; si falta o es inválido se usa el default):
+
+   | Propiedad | Default | Qué limita |
+   |---|---|---|
+   | `RL_CREATE_PER_MIN` | 10 | `create`, global por minuto |
+   | `RL_CREATE_PER_HOUR` | 60 | `create`, global por hora |
+   | `RL_CREATE_PER_WA_10MIN` | 3 | `create`, por WhatsApp (normalizado, con hash) cada 10 min |
+   | `RL_VERIFY_PER_MIN` | 30 | `verify`, global por minuto |
+   | `RL_VERIFY_PER_HOUR` | 300 | `verify`, global por hora |
+   | `RL_WEBHOOK_PER_MIN` | 60 | notificaciones de MP **con la clave correcta**, por minuto |
+
    `MODE` es exacto (minúsculas). Si falta algo obligatorio para el modo, el script **falla cerrado**: no procesa create / verify / webhook / reconcile ni escribe, responde `ok:false`, `error:"config"` y loguea qué falta (`checkConfig` también lo muestra). `WEBHOOK_KEY` va en `notification_url` como `&k=…`; las notificaciones sin esa clave se descartan sin consultar a MP. `MP_COLLECTOR_ID` es el user id de la cuenta que cobra: un pago de otra cuenta no se acepta.
 
 5. **Implementar → Nueva implementación → tipo “Aplicación web”**: *Ejecutar como*: **Yo**; *Quién tiene acceso*: **Cualquier persona**. Autorizá los permisos (planilla, conexiones externas, triggers).
@@ -134,6 +145,9 @@ Solapa buscada **por sheetId `934024988`** (no por nombre). Encabezados en la fi
 - Apps Script no puede leer headers, así que **no se valida la firma `x-signature`** del webhook; en su lugar la `notification_url` lleva `&k=<WEBHOOK_KEY>` (lo que no trae esa clave se descarta sin llamar a MP) y cada notificación se re-consulta a la API con el token (una notificación falsa no puede anotar nada). Webhooks configurados a mano en el panel de MP (sin `k`) se descartan.
 - El front solo redirige a `https://www.mercadopago.com.ar/` o `https://sandbox.mercadopago.com.ar/` (o, en mock, a la `confirmacion.html` del mismo sitio) y solo muestra “¡Listo!” si el servidor confirma aprobado + anotado; si no, “Estamos verificando tu pago”.
 - Aviso de privacidad (Ley 25.326, art. 6, y Disposición AAIP 10/2008) visible debajo del botón de pago.
+- **Límite de pedidos** (para que nadie agote las cuotas diarias de Apps Script ni golpee a MP copiando la URL `/exec`): contadores de ventana fija en `CacheService`, al principio de `doPost` y en este orden: cuerpo > 4 KB → `too_large` sin parsear; `JSON.parse`; `create`/`verify` → límites globales (y por WhatsApp en `create`) **antes** de leer toda la configuración, abrir la planilla, tomar el lock o llamar a MP; recién después la configuración y el handler. Webhooks: primero la clave `k` (gratis), después su propio límite; los límites de `create`/`verify` no los afectan. `reconcile` no tiene límite. Limitado → `{ok:false, error:"rate_limited"}` (se loguea una vez por ventana); el front lo muestra y en `confirmacion.html` queda en “Estamos verificando”. CacheService no es atómico: con mucha concurrencia puede pasarse por poco.
+- Las Script Properties se leen una sola vez por ejecución (`getProperties`) y la planilla se abre una sola vez por ejecución.
+- **Fechas**: `create` acepta clases hasta hoy + 120 días (hora de Argentina); la landing y `generar.html` también. Al revalidar la metadata de un pago se acepta desde hoy − 30 hasta hoy + 127 días (notificaciones tardías).
 - Apps Script responde a los POST con una redirección 302; MP puede reintentar la notificación. No pasa nada: la escritura es idempotente y `reconcile` cubre cualquier notificación perdida.
 - El token nunca se loguea ni se devuelve. `doGet` responde solo `{"ok":true}`.
 - `confirmacion.html` devuelve solo el primer nombre y los datos de la clase; nunca el teléfono.
@@ -142,6 +156,10 @@ Solapa buscada **por sheetId `934024988`** (no por nombre). Encabezados en la fi
 ## GitHub Pages
 
 El workflow `.github/workflows/pages.yml` publica en cada push a `main`. **Requiere activar Pages una vez** en *Settings → Pages → Build and deployment → Source: **GitHub Actions***. (Alternativa: “Deploy from a branch” → `main` / `(root)`; en ese caso borrá el workflow para que no falle.)
+
+## Pruebas automáticas
+
+En `tests/` (ver `tests/README.md`): `node tests/harness.js` (backend simulado, sin dependencias) y `cd tests && npm i && node front.js` (front en Chrome headless).
 
 ## Probar localmente
 

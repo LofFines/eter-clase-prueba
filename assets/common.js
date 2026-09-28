@@ -24,6 +24,7 @@
   var MAPS_URL = 'https://www.google.com/maps/search/?api=1&query=' +
     encodeURIComponent('San Martín 39, Ciudadela, Buenos Aires, Argentina');
   var PRECIO_TEXTO = '$5.000';
+  var MAX_DIAS_ADELANTE = 120; // igual que ETER.MAX_DIAS_ADELANTE en Code.gs
 
   /** true solo si el slug es una disciplina propia del mapa (nada de "constructor", "toString", etc.). */
   function esDisciplina(d) {
@@ -71,6 +72,15 @@
 
   function hoyArgentina() { return ahoraArgentina().slice(0, 10); }
 
+  /** "YYYY-MM-DD" + n días (calendario puro). */
+  function sumarDias(ymd, n) {
+    var dt = new Date(Date.UTC(+ymd.slice(0, 4), +ymd.slice(5, 7) - 1, +ymd.slice(8, 10) + n));
+    return dt.toISOString().slice(0, 10);
+  }
+
+  /** Última fecha reservable (hoy + 120 días, hora de Argentina). */
+  function fechaMaxima() { return sumarDias(hoyArgentina(), MAX_DIAS_ADELANTE); }
+
   /** "viernes 2 de octubre" */
   function fechaHumana(f) {
     var p = parseFecha(f);
@@ -90,6 +100,7 @@
     if (!parseFecha(f)) return { ok: false, motivo: 'fecha' };
     if (!parseHora(h)) return { ok: false, motivo: 'hora' };
     if ((f + ' ' + h) < ahoraArgentina()) return { ok: false, motivo: 'pasada' };
+    if (f > fechaMaxima()) return { ok: false, motivo: 'lejana' };
     return { ok: true, clase: { d: d, f: f, h: h } };
   }
 
@@ -152,6 +163,7 @@
     waLink: waLink, parseFecha: parseFecha, parseHora: parseHora, fechaHumana: fechaHumana,
     claseHumana: claseHumana, validarClase: validarClase, normalizarCelular: normalizarCelular,
     ahoraArgentina: ahoraArgentina, hoyArgentina: hoyArgentina, el: el, show: show,
+    MAX_DIAS_ADELANTE: MAX_DIAS_ADELANTE, sumarDias: sumarDias, fechaMaxima: fechaMaxima,
     scriptConfigurado: scriptConfigurado, llamarScript: llamarScript
   };
 })(window);

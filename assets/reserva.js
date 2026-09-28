@@ -17,6 +17,10 @@
       E.el('titulo-invalido').textContent = 'Esta clase ya pasó';
       texto.textContent = 'La fecha de este link ya quedó atrás. Escribinos y buscamos otro día que te quede cómodo.';
       msgWa = 'Hola Araceli! Me quedó vencido el link de la clase de prueba. ¿Me pasás otro día y horario?';
+    } else if (check.motivo === 'lejana') {
+      E.el('titulo-invalido').textContent = 'Esa fecha está muy lejos';
+      texto.textContent = 'Por ahora reservamos hasta ' + E.MAX_DIAS_ADELANTE + ' días para adelante. Escribinos y buscamos una fecha que te quede cómoda.';
+      msgWa = 'Hola Araceli! Mi link de la clase de prueba tiene una fecha muy lejana. ¿Me pasás otro día?';
     }
     E.el('wa-link-invalido').href = E.waLink(msgWa);
     E.show(E.el('vista-link-invalido'), true);
@@ -163,6 +167,12 @@
         mostrarError('<p>Recibimos un link de pago que no reconocemos, así que por seguridad no te llevamos ahí. ' +
           'No se te cobró nada. Escribinos y te ayudamos a reservar.</p>' +
           '<p><a href="' + waAyuda(nombre) + '" rel="noopener">Pedir ayuda por WhatsApp</a></p>');
+        return;
+      }
+      if (res && res.error === 'rate_limited') {
+        // Demasiados pedidos: el mensaje del servidor ya dice qué hacer; sin reintento automático.
+        mostrarError('<p>' + escapeHtml(res.message || 'Hay muchos pedidos en este momento. Probá de nuevo en unos minutos.') + '</p>' +
+          '<p><a href="' + waAyuda(nombre) + '" rel="noopener">Si preferís, escribinos por WhatsApp</a></p>');
         return;
       }
       var msg = (res && res.message) ? res.message : 'No pudimos preparar el pago.';

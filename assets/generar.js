@@ -20,6 +20,7 @@
   if (base.slice(-1) !== '/') base += '/';
 
   inFecha.min = E.hoyArgentina();
+  inFecha.max = E.fechaMaxima();
   var linkActual = '';
   var mensajeEditado = false;
 
@@ -74,6 +75,7 @@
     if (!v.ok) {
       linkActual = '';
       if (v.motivo === 'pasada') err(f < E.hoyArgentina() ? 'fecha' : 'hora', 'Ese día y hora ya pasaron.');
+      else if (v.motivo === 'lejana') err('fecha', 'Se puede reservar hasta ' + E.MAX_DIAS_ADELANTE + ' días para adelante.');
       else if (v.motivo === 'fecha') err('fecha', 'Revisá la fecha.');
       else err('hora', 'Revisá la hora.');
       outResumen.textContent = 'Revisá los datos.';

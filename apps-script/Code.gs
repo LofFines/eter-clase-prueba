@@ -16,6 +16,7 @@
  *   WEBAPP_URL       sandbox/production: obligatorio, https://…/exec (base de notification_url).
  *   SHEET_ID         (opcional) id de la planilla. Si falta, usa la planilla contenedora.
  *   SITE_URL         https://loffines.github.io/eter-clase-prueba/
+ *   RL_*             (opcionales) límites de pedidos; ver ETER.RL. Faltante o inválido → default.
  *
  * Seguridad:
  *   - El precio (5000) y la moneda (ARS) están fijos acá; el navegador no los puede cambiar.
@@ -28,6 +29,9 @@
  *     tienen formato texto.
  *   - En mock y sandbox la columna G dice "PRUEBA" (nunca "Sí") y K lo aclara.
  *   - Escritura: primero K (con "id <payment_id>", reserva la fila) y después A:I; J nunca se toca.
+ *   - Límite de pedidos (CacheService, ventanas fijas) al principio de doPost, antes de leer la
+ *     configuración completa, abrir la planilla, tomar el lock o llamar a MP. Cuerpo máx. 4 KB.
+ *   - create acepta clases hasta hoy + 120 días (hora de Argentina).
  *   - El token jamás se loguea ni se devuelve.
  */
 
@@ -59,12 +63,46 @@ var ETER = {
   // Columnas (1 = A)
   COL: { A: 1, K: 11 },
   FORMATO_FECHA: 'dd/mm',        // formato que ya usa la columna A
-  FORMATO_FECHA_HORA: 'dd/mm HH:mm' // formato que ya usa la columna F
+  FORMATO_FECHA_HORA: 'dd/mm HH:mm', // formato que ya usa la columna F
+  // Fechas de clase: create acepta hasta hoy + MAX_DIAS_ADELANTE. Al revalidar la metadata de un pago
+  // (puede llegar tarde) se acepta desde hoy - METADATA_DIAS_ATRAS hasta hoy + MAX + METADATA_MARGEN_DIAS.
+  MAX_DIAS_ADELANTE: 120,
+  METADATA_DIAS_ATRAS: 30,
+  METADATA_MARGEN_DIAS: 7,
+  // Límites de pedidos (ventanas fijas en CacheService). Cada uno se puede cambiar con la Script Property
+  // del mismo nombre (entero 1..100000); si falta o es inválida se usa este default.
+  RL: {
+    MAX_BODY: 4096,                 // caracteres del cuerpo del POST; más grande → se rechaza sin parsear
+    MAX: 100000,
+    DEFAULTS: {
+      RL_CREATE_PER_MIN: 10,        // create, global por minuto
+      RL_CREATE_PER_HOUR: 60,       // create, global por hora
+      RL_CREATE_PER_WA_10MIN: 3,    // create, por WhatsApp normalizado cada 10 min
+      RL_VERIFY_PER_MIN: 30,        // verify, global por minuto (en sandbox/producción consulta a MP)
+      RL_VERIFY_PER_HOUR: 300,      // verify, global por hora (tope diario ≈ 7.200 consultas a MP)
+      RL_WEBHOOK_PER_MIN: 60        // webhook con clave válida, global por minuto
+    }
+  }
 };
 
+var RL_MSG_GLOBAL = 'Hay muchos pedidos en este momento. Probá de nuevo en unos minutos.';
+var RL_MSG_PERSONA = 'Ya recibimos varios pedidos con este WhatsApp. Esperá unos minutos y probá de nuevo.';
+
 // ───────────────────────── Configuración ─────────────────────────
+// Las Script Properties se leen UNA vez por ejecución (getProperties) y se guardan acá: menos lecturas
+// de la cuota diaria de Properties. Cada ejecución de Apps Script arranca con este valor en null.
+var PROPS_MEMO_ = null;
+function props_() {
+  if (!PROPS_MEMO_) PROPS_MEMO_ = PropertiesService.getScriptProperties().getProperties() || {};
+  return PROPS_MEMO_;
+}
+function prop_(k) {
+  var v = props_()[k];
+  return v === undefined || v === null ? '' : String(v);
+}
+
 function cfg_() {
-  var p = PropertiesService.getScriptProperties();
+  var p = { getProperty: prop_ };
   // Sin default ni minúsculas: si MODE no es exactamente uno de ETER.MODOS, el modo queda inválido
   // y configError_() hace que todo falle cerrado. (Solo se recortan espacios al principio/final.)
   var mode = String(p.getProperty('MODE') || '').trim();
@@ -137,14 +175,27 @@ function doGet() {
   return json_({ ok: true });
 }
 
+/**
+ * Orden (de lo más barato a lo más caro):
+ *  1) tamaño del cuerpo (> 4 KB → rechazo sin parsear)
+ *  2) JSON.parse
+ *  3) create/verify: límites globales (+ por WhatsApp en create, con validación mínima de ese campo),
+ *     antes de cfg_, de abrir la planilla, del lock y de MP
+ *  4) configuración (configError_) y recién ahí el handler
+ *  Notificaciones de MP: clave WEBHOOK_KEY primero (gratis), después su propio límite, después config.
+ */
 function doPost(e) {
   try {
     var params = (e && e.parameter) || {};
     var raw = (e && e.postData && e.postData.contents) || '';
+    if (raw.length > ETER.RL.MAX_BODY) return json_({ ok: false, error: 'too_large', message: 'Pedido no reconocido.' });
     var body = null;
     try { body = raw ? JSON.parse(raw) : null; } catch (err) { body = null; }
+    if (body !== null && (typeof body !== 'object' || Array.isArray(body))) body = null;
 
     if (body && (body.action === 'create' || body.action === 'verify')) {
+      var limitado = body.action === 'create' ? limiteCreate_(body) : limiteVerify_();
+      if (limitado) return json_(limitado);
       var errCfg = configError_(cfg_(), 'doPost ' + body.action);
       if (errCfg) return json_(errCfg);
       return json_(body.action === 'create' ? handleCreate_(body) : handleVerify_(body));
@@ -157,6 +208,9 @@ function doPost(e) {
       // Sin la clave correcta (&k= en notification_url) se descarta en silencio: no se consulta a MP.
       var c = cfg_();
       if (!claveWebhookOk_(params.k, c.webhookKey)) return json_({ ok: true });
+      if (!rlContar_('webhook:m', limite_('RL_WEBHOOK_PER_MIN'), 60)) {
+        return json_({ ok: false, error: 'rate_limited' }); // la conciliación (reconcile) lo levanta después
+      }
       var errWh = configError_(c, 'webhook');
       if (errWh) return json_(errWh);
       if (tipo.indexOf('payment') === 0) {
@@ -172,6 +226,68 @@ function doPost(e) {
     console.error('doPost error: ' + (err && err.message));
     return json_({ ok: false, error: 'internal', message: 'Tuvimos un problema técnico.' });
   }
+}
+
+// ───────────────────────── Límite de pedidos ─────────────────────────
+/** Reloj (aparte para poder probarlo). */
+function ahoraMs_() { return Date.now(); }
+
+/** Límite configurado por Script Property (entero 1..100000) o el default. */
+function limite_(nombre) {
+  var raw = prop_(nombre).trim();
+  var n = /^\d{1,6}$/.test(raw) ? parseInt(raw, 10) : NaN;
+  return (n >= 1 && n <= ETER.RL.MAX) ? n : ETER.RL.DEFAULTS[nombre];
+}
+
+/**
+ * Contador de ventana fija en CacheService. true = permitido. No es atómico (sin lock a propósito):
+ * con concurrencia puede pasarse por poco. Ya excedido: solo 1 lectura, sin escribir ni loguear.
+ * Loguea una sola vez por ventana (cuando se cruza el límite).
+ */
+function rlContar_(clave, limite, ventanaSeg) {
+  var cache = CacheService.getScriptCache();
+  var k = 'rl:' + clave + ':' + Math.floor(ahoraMs_() / (ventanaSeg * 1000));
+  var n = parseInt(cache.get(k), 10) || 0;
+  if (n > limite) return false;
+  n++;
+  cache.put(k, String(n), ventanaSeg + 60); // TTL un poco más largo que la ventana
+  if (n > limite) {
+    console.warn('rate limit: "' + clave.split(':').slice(0, 2).join(':') + '" superó ' + limite + ' pedidos en ' + ventanaSeg + ' s.');
+    return false;
+  }
+  return true;
+}
+
+/** null si pasa; si no, la respuesta rate_limited. Global (minuto y hora) y por WhatsApp normalizado. */
+function limiteCreate_(b) {
+  if (!rlContar_('create:m', limite_('RL_CREATE_PER_MIN'), 60) ||
+      !rlContar_('create:h', limite_('RL_CREATE_PER_HOUR'), 3600)) {
+    return { ok: false, error: 'rate_limited', message: RL_MSG_GLOBAL };
+  }
+  var wa = normalizarCelular_(b.whatsapp); // validación mínima del campo (el resto la hace validarReserva_)
+  if (wa && !rlContar_('create:wa:' + hashCorto_(wa), limite_('RL_CREATE_PER_WA_10MIN'), 600)) {
+    return { ok: false, error: 'rate_limited', message: RL_MSG_PERSONA };
+  }
+  return null;
+}
+
+function limiteVerify_() {
+  if (!rlContar_('verify:m', limite_('RL_VERIFY_PER_MIN'), 60) ||
+      !rlContar_('verify:h', limite_('RL_VERIFY_PER_HOUR'), 3600)) {
+    return { ok: false, error: 'rate_limited', message: RL_MSG_GLOBAL };
+  }
+  return null;
+}
+
+/** 16 caracteres hex de SHA-256 (para no guardar teléfonos en claro en las claves del caché). */
+function hashCorto_(s) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(s), Utilities.Charset.UTF_8);
+  var hex = '';
+  for (var i = 0; i < 8; i++) {
+    var v = (bytes[i] + 256) % 256;
+    hex += (v < 16 ? '0' : '') + v.toString(16);
+  }
+  return hex;
 }
 
 // ───────────────────────── create ─────────────────────────
@@ -373,9 +489,14 @@ function installTriggers() {
 }
 
 // ───────────────────────── Planilla ─────────────────────────
+var SS_MEMO_ = null; // una apertura por ejecución
 function getSpreadsheet_(cfg) {
   var c = cfg || cfg_();
-  return c.sheetId ? SpreadsheetApp.openById(c.sheetId) : SpreadsheetApp.getActiveSpreadsheet();
+  var clave = c.sheetId || '(activa)';
+  if (SS_MEMO_ && SS_MEMO_.clave === clave) return SS_MEMO_.ss;
+  var ss = c.sheetId ? SpreadsheetApp.openById(c.sheetId) : SpreadsheetApp.getActiveSpreadsheet();
+  SS_MEMO_ = { clave: clave, ss: ss };
+  return ss;
 }
 
 function getSheet_(cfg) {
@@ -628,7 +749,19 @@ function validarReserva_(b, opciones) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !fechaReal_(fecha)) return { ok: false, message: 'La fecha no es válida.' };
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(hora)) return { ok: false, message: 'La hora no es válida.' };
   var ahora = Utilities.formatDate(new Date(), ETER.TZ, 'yyyy-MM-dd HH:mm');
-  if (!permitirPasada && fecha + ' ' + hora < ahora) return { ok: false, message: 'Esa clase ya pasó.' };
+  var hoy = ahora.slice(0, 10);
+  if (permitirPasada) {
+    // Metadata de un pago (puede anotarse tarde): rango amplio pero acotado.
+    if (fecha < sumarDias_(hoy, -ETER.METADATA_DIAS_ATRAS) ||
+        fecha > sumarDias_(hoy, ETER.MAX_DIAS_ADELANTE + ETER.METADATA_MARGEN_DIAS)) {
+      return { ok: false, message: 'La fecha de la clase está fuera de rango.' };
+    }
+  } else {
+    if (fecha + ' ' + hora < ahora) return { ok: false, message: 'Esa clase ya pasó.' };
+    if (fecha > sumarDias_(hoy, ETER.MAX_DIAS_ADELANTE)) {
+      return { ok: false, message: 'Esa fecha está muy lejos: se reserva hasta ' + ETER.MAX_DIAS_ADELANTE + ' días para adelante. Escribinos y la coordinamos.' };
+    }
+  }
   if (nombre.length < 2 || nombre.length > 60) return { ok: false, message: 'Revisá el nombre.' };
   if (!LETRA_RE.test(nombre)) return { ok: false, message: 'Revisá el nombre: tiene que tener al menos una letra.' };
   // (La protección contra fórmulas se aplica al escribir en la planilla: textoPlanilla_.)
@@ -642,6 +775,12 @@ function validarReserva_(b, opciones) {
 function disciplinaValida_(d) {
   return typeof d === 'string' && /^[a-z]+(-[a-z]+)*$/.test(d) &&
     Object.prototype.hasOwnProperty.call(ETER.DISCIPLINAS, d);
+}
+
+/** "2026-10-09" + n días → "YYYY-MM-DD" (calendario puro, sin zonas horarias). */
+function sumarDias_(ymd, n) {
+  var dt = new Date(Date.UTC(+ymd.slice(0, 4), +ymd.slice(5, 7) - 1, +ymd.slice(8, 10) + n));
+  return dt.toISOString().slice(0, 10);
 }
 
 function fechaReal_(f) {
