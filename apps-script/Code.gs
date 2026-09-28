@@ -1,30 +1,33 @@
 /**
  * Espacio Éter · Reserva y pago de la clase de prueba
- * Backend en Google Apps Script (pegado a la planilla "Control marketing").
+ * Backend en Google Apps Script (app web pegada a una planilla; escribe en la solapa sheetId 934024988).
+ * Falla cerrado: si la configuración no es válida para el MODE, no procesa nada (create, verify,
+ * webhook, reconcile ni escrituras) y lo loguea.
  *
  * Script Properties (Configuración del proyecto > Propiedades de la secuencia de comandos):
  *   MODE             Obligatorio y exacto: "mock" | "sandbox" | "production" (minúsculas).
- *                    Si falta o es otro valor, el script NO funciona (falla cerrado) y lo loguea.
- *   MOCK_SHEET_ID    Obligatorio en mock: id de la planilla PRUEBA. Mock solo anda si la planilla
- *                    que usa el script (SHEET_ID o la contenedora) es exactamente esa.
- *   MP_ACCESS_TOKEN  Access Token de Mercado Pago (de prueba en sandbox). NO hace falta en mock.
- *   WEBHOOK_KEY      Secreto largo (sandbox/producción). Va en notification_url como &k=...; las
- *                    notificaciones sin esa clave se descartan sin consultar a MP.
- *   MP_COLLECTOR_ID  (opcional, recomendado) user id de la cuenta de MP que cobra. Si está, un pago
- *                    de otra cuenta no se acepta.
+ *   MOCK_SHEET_ID    id de la planilla PRUEBA (alias aceptado: TEST_SHEET_ID).
+ *                    mock y sandbox: obligatorio, y la planilla que usa el script tiene que ser esa.
+ *                    production: si está cargado, la planilla NO puede ser esa.
+ *   MP_ACCESS_TOKEN  sandbox/production: obligatorio (de prueba en sandbox). No se usa en mock.
+ *   MP_COLLECTOR_ID  sandbox/production: obligatorio, solo dígitos (user id de la cuenta que cobra).
+ *   WEBHOOK_KEY      sandbox/production: obligatorio, 32+ caracteres. Va en notification_url como
+ *                    &k=...; las notificaciones sin esa clave se descartan sin consultar a MP.
+ *   WEBAPP_URL       sandbox/production: obligatorio, https://…/exec (base de notification_url).
  *   SHEET_ID         (opcional) id de la planilla. Si falta, usa la planilla contenedora.
  *   SITE_URL         https://loffines.github.io/eter-clase-prueba/
- *   WEBAPP_URL       URL de esta app web (termina en /exec). Se usa para notification_url.
  *
  * Seguridad:
  *   - El precio (5000) y la moneda (ARS) están fijos acá; el navegador no los puede cambiar.
  *   - Nunca se anota una fila con datos que manda el navegador: en sandbox/producción los datos
- *     salen del pago consultado a Mercado Pago con nuestro token (metadata) y solo si está
- *     aprobado por $5.000 ARS con una referencia "ETER-" (y, si están configurados, de nuestra
- *     cuenta y con live_mode acorde al modo). En mock salen del caché del create.
+ *     salen del pago consultado a Mercado Pago con nuestro token (metadata, revalidada con
+ *     validarReserva_) y solo si está aprobado por $5.000 ARS, con referencia "ETER-", cobrado por
+ *     MP_COLLECTOR_ID y con live_mode acorde al modo. En mock salen del caché del create.
  *   - verify solo devuelve datos si la external_reference del pedido coincide con la del pago.
- *   - Todo texto libre que va a la planilla pasa por textoPlanilla_() (anti fórmulas).
- *   - En mock la columna G dice "PRUEBA" (nunca "Sí").
+ *   - Todo texto libre que va a la planilla pasa por textoPlanilla_() (anti fórmulas) y B, D y K
+ *     tienen formato texto.
+ *   - En mock y sandbox la columna G dice "PRUEBA" (nunca "Sí") y K lo aclara.
+ *   - Escritura: primero K (con "id <payment_id>", reserva la fila) y después A:I; J nunca se toca.
  *   - El token jamás se loguea ni se devuelve.
  */
 
@@ -73,6 +76,7 @@ function cfg_() {
     token: String(p.getProperty('MP_ACCESS_TOKEN') || '').trim(),
     sheetId: String(p.getProperty('SHEET_ID') || '').trim(),
     mockSheetId: String(p.getProperty('MOCK_SHEET_ID') || '').trim(),
+    testSheetIdAlias: String(p.getProperty('TEST_SHEET_ID') || '').trim(), // alias de MOCK_SHEET_ID
     webhookKey: String(p.getProperty('WEBHOOK_KEY') || ''),
     collectorId: String(p.getProperty('MP_COLLECTOR_ID') || '').trim(),
     siteUrl: site,
@@ -80,21 +84,43 @@ function cfg_() {
   };
 }
 
+/** MOCK_SHEET_ID (o su alias TEST_SHEET_ID). Si están los dos y son distintos: ambiguo → null. */
+function idPlanillaPrueba_(c) {
+  if (c.mockSheetId && c.testSheetIdAlias && c.mockSheetId !== c.testSheetIdAlias) return null;
+  return c.mockSheetId || c.testSheetIdAlias || '';
+}
+
 /**
- * Devuelve '' si la configuración permite operar, o el motivo (para el log) si no.
+ * Devuelve '' si la configuración permite operar, o los motivos (para el log) si no.
  * - MODE tiene que ser exactamente mock | sandbox | production.
- * - mock solo si la planilla que usa el script es la de MOCK_SHEET_ID (nunca la real).
+ * - sandbox/production: MP_ACCESS_TOKEN, MP_COLLECTOR_ID (dígitos), WEBHOOK_KEY (32+) y
+ *   WEBAPP_URL (https://) obligatorios.
+ * - mock y sandbox: solo sobre la planilla MOCK_SHEET_ID. production: nunca sobre esa planilla.
  */
 function motivoConfigInvalida_(c) {
   if (!c.modeOk) return 'MODE inválido o vacío (tiene que ser exactamente mock, sandbox o production)';
-  if (c.mode === 'mock') {
-    if (!c.mockSheetId) return 'MODE=mock sin MOCK_SHEET_ID';
-    var ss = null;
-    try { ss = getSpreadsheet_(c); } catch (err) { ss = null; }
-    if (!ss) return 'MODE=mock pero no hay planilla';
-    if (String(ss.getId()) !== c.mockSheetId) return 'MODE=mock pero la planilla no es la de MOCK_SHEET_ID';
+  var m = [];
+  if (c.mode !== 'mock') {
+    if (!c.token) m.push('falta MP_ACCESS_TOKEN');
+    if (!/^\d+$/.test(c.collectorId)) m.push('MP_COLLECTOR_ID falta o no es solo dígitos');
+    if (c.webhookKey.length < 32) m.push('WEBHOOK_KEY falta o tiene menos de 32 caracteres');
+    if (!/^https:\/\/\S+$/.test(c.webappUrl)) m.push('WEBAPP_URL falta o no empieza con https://');
   }
-  return '';
+  var prueba = idPlanillaPrueba_(c);
+  if (prueba === null) {
+    m.push('MOCK_SHEET_ID y TEST_SHEET_ID son distintos');
+  } else if (c.mode === 'mock' || c.mode === 'sandbox' || prueba) {
+    var ssId = '';
+    try { var ss = getSpreadsheet_(c); ssId = ss ? String(ss.getId()) : ''; } catch (err) { ssId = ''; }
+    if (c.mode === 'mock' || c.mode === 'sandbox') {
+      if (!prueba) m.push('MODE=' + c.mode + ' sin MOCK_SHEET_ID');
+      else if (!ssId) m.push('MODE=' + c.mode + ' pero no hay planilla');
+      else if (ssId !== prueba) m.push('MODE=' + c.mode + ' pero la planilla no es la de MOCK_SHEET_ID');
+    } else if (ssId && ssId === prueba) {
+      m.push('MODE=production sobre la planilla de prueba (MOCK_SHEET_ID)');
+    }
+  }
+  return m.join('; ');
 }
 
 /** null si está todo bien; si no, loguea y devuelve la respuesta de error (ok:false, sin detalles). */
@@ -210,11 +236,8 @@ function handleCreate_(b) {
     expiration_date_from: isoAr_(ahora),
     expiration_date_to: isoAr_(vence)
   };
-  if (!c.webhookKey) {
-    console.warn('create: falta WEBHOOK_KEY en modo ' + c.mode + '; la preferencia va sin notification_url (queda reconcile).');
-  } else if (/^https:\/\//.test(c.webappUrl)) {
-    pref.notification_url = c.webappUrl + '?src=mp&k=' + encodeURIComponent(c.webhookKey);
-  }
+  // motivoConfigInvalida_ ya garantiza WEBAPP_URL https:// y WEBHOOK_KEY de 32+ caracteres.
+  pref.notification_url = c.webappUrl + '?src=mp&k=' + encodeURIComponent(c.webhookKey);
 
   var res = mpFetch_('post', '/checkout/preferences', pref, c.token, reservaId);
   if (res.code !== 200 && res.code !== 201) {
@@ -264,9 +287,13 @@ function handleVerify_(b) {
   if (String(pago.external_reference || '') !== ref) {
     return { ok: false, error: 'mismatch', message: 'El pago no coincide con la reserva.' };
   }
-  var datos = datosDePago_(pago);
+  var dv = datosValidadosDePago_(pago);
+  var datos = dv.ok ? dv.datos : null;
   var check = pagoValido_(pago, c);
   if (check.ok) {
+    if (!dv.ok) {
+      return { ok: false, error: 'invalid_metadata', message: 'Recibimos el pago pero no pudimos anotarlo solos. Escribinos y lo resolvemos.' };
+    }
     var reg = registrar_(String(pago.id), datos, c);
     return { ok: true, mode: c.mode, status: 'approved', payment_id: String(pago.id), registrado: reg.ok, reserva: vistaPublica_(datos) };
   }
@@ -287,7 +314,10 @@ function handleWebhook_(id) {
   if (!/^\d{1,20}$/.test(id)) return { ok: true };
   var pago = obtenerPago_(id, c.token);   // se re-consulta siempre: no confiamos en el cuerpo de la notificación
   if (!pago) return { ok: true };
-  if (pagoValido_(pago, c).ok) registrar_(String(pago.id), datosDePago_(pago), c);
+  if (pagoValido_(pago, c).ok) {
+    var dv = datosValidadosDePago_(pago);
+    if (dv.ok) registrar_(String(pago.id), dv.datos, c);
+  }
   return { ok: true };
 }
 
@@ -320,7 +350,9 @@ function reconcile() {
       revisados++;
       if (!pagoValido_(p, c).ok) continue;
       if (!p.metadata || !p.metadata.nombre) p = obtenerPago_(String(p.id), c.token) || p;
-      var r = registrar_(String(p.id), datosDePago_(p), c);
+      var dv = datosValidadosDePago_(p);
+      if (!dv.ok) continue;
+      var r = registrar_(String(p.id), dv.datos, c);
       if (r.written) escritos++;
     }
     var total = (res.data.paging && res.data.paging.total) || 0;
@@ -358,7 +390,10 @@ function getSheet_(cfg) {
 
 /**
  * Anota la reserva pagada. Idempotente por payment_id (busca "id <payment_id>" en la columna K).
- * Escribe A:I y K por separado; J NO se toca (tiene un ARRAYFORMULA en J2).
+ * Orden: 1) K con la nota (incluye "id <payment_id>": reserva la fila), 2) A:I. J NO se toca
+ * (tiene un ARRAYFORMULA en J2), por eso nunca se escribe A:K de una.
+ * Si K ya tiene el id pero B está vacía (fila a medio escribir), se completa esa misma fila.
+ * Si falla la escritura de A:I, K queda y el próximo intento (verify/webhook/reconcile) la completa.
  */
 function registrar_(paymentId, datos, cfg) {
   var c = cfg || cfg_();
@@ -381,22 +416,29 @@ function registrar_(paymentId, datos, cfg) {
     var maxRows = sheet.getMaxRows();
     var data = maxRows > 1 ? sheet.getRange(2, 1, maxRows - 1, ETER.COL.K).getValues() : [];
 
-    // 1) ¿Ya está anotado?
+    // 1) ¿Ya está anotado? (K con el id). Con B llena: duplicado. Con B vacía: completar esa fila.
     var re = new RegExp('(^|[^0-9A-Za-z-])id ' + escapeRe_(paymentId) + '(?![0-9A-Za-z-])');
+    var row = -1, completar = false;
     for (var i = 0; i < data.length; i++) {
-      if (re.test(String(data[i][10] || ''))) return { ok: true, written: false, duplicate: true, row: i + 2 };
+      if (re.test(String(data[i][10] || ''))) {
+        if (String(data[i][1] || '') !== '') return { ok: true, written: false, duplicate: true, row: i + 2 };
+        row = i + 2; completar = true;
+        console.warn('registrar_: la fila ' + row + ' tenía el id ' + paymentId + ' en K pero B vacía; la completo.');
+        break;
+      }
     }
 
-    // 2) Primera fila vacía (A y B vacías, y sin nada en C:I ni K para no pisar algo a medio cargar).
-    var row = -1;
-    for (var j = 0; j < data.length; j++) {
-      var r = data[j];
-      var vacia = true;
-      for (var k = 0; k < ETER.COL.K; k++) {
-        if (k === 9) continue; // J: fórmula
-        if (r[k] !== '' && r[k] !== null) { vacia = false; break; }
+    // 2) Si no: primera fila vacía (A:I y K vacías; J es fórmula), para no pisar algo a medio cargar.
+    if (row === -1) {
+      for (var j = 0; j < data.length; j++) {
+        var r = data[j];
+        var vacia = true;
+        for (var k = 0; k < ETER.COL.K; k++) {
+          if (k === 9) continue; // J: fórmula
+          if (r[k] !== '' && r[k] !== null) { vacia = false; break; }
+        }
+        if (vacia) { row = j + 2; break; }
       }
-      if (vacia) { row = j + 2; break; }
     }
     if (row === -1) {
       sheet.insertRowsAfter(maxRows, 50);
@@ -404,34 +446,49 @@ function registrar_(paymentId, datos, cfg) {
       console.warn('registrar_: la solapa estaba llena, agregué 50 filas (el ARRAYFORMULA de J llega hasta la fila 1000).');
     }
 
+    var prueba = c.mode === 'mock' || c.mode === 'sandbox';
     var origen = origenParaPlanilla_(datos.origen);
     // Fechas como número de serie de Sheets (hora de pared de Argentina), no como Date:
     // así no depende de la zona horaria de la planilla ni del script, y Sheets no pisa el formato.
     var hoy = serialSheets_(Utilities.formatDate(new Date(), ETER.TZ, 'yyyy-MM-dd'), '00:00');
     var clase = serialSheets_(datos.fecha, datos.hora);
-    var nota = (c.mode === 'mock' ? 'PRUEBA (mock), no se cobró · id ' : 'Pagó $5.000 MP · id ') + paymentId +
-      (origen.nota ? ' · ' + origen.nota : '');
+    var prefijoNota = c.mode === 'mock' ? 'PRUEBA (mock), no se cobró · id '
+      : c.mode === 'sandbox' ? 'SANDBOX, no es plata real · id '
+      : 'Pagó $5.000 MP · id ';
+    var nota = prefijoNota + paymentId + (origen.nota ? ' · ' + origen.nota : '');
 
-    // Formatos de la columna (los mismos que ya usa la planilla): A dd/mm, C texto, F dd/mm HH:mm.
+    // Formatos: A dd/mm, F dd/mm HH:mm (números); B, C, D y K texto ("1e5" no se vuelve número).
     sheet.getRange(row, 1).setNumberFormat(ETER.FORMATO_FECHA);
-    sheet.getRange(row, 3).setNumberFormat('@'); // WhatsApp como texto
+    sheet.getRange(row, 2).setNumberFormat('@');
+    sheet.getRange(row, 3).setNumberFormat('@');
+    sheet.getRange(row, 4).setNumberFormat('@');
     sheet.getRange(row, 6).setNumberFormat(ETER.FORMATO_FECHA_HORA);
+    sheet.getRange(row, ETER.COL.K).setNumberFormat('@');
 
-    sheet.getRange(row, 1, 1, 9).setValues([[
-      hoy,                                   // A Fecha anotación (serial → se ve dd/mm)
-      textoPlanilla_(datos.nombre),          // B Nombre (anti fórmulas)
-      whatsappPlanilla_(datos.whatsapp),     // C WhatsApp (texto)
-      textoPlanilla_(origen.valor),          // D Anuncio de origen (de la lista)
-      ETER.DISCIPLINAS[datos.disciplina],    // E Disciplina
-      clase,                                 // F Día y hora de la clase (serial → dd/mm HH:mm; alimenta la fórmula de J)
-      c.mode === 'mock' ? 'PRUEBA' : 'Sí',   // G ¿Confirmó? (en mock nunca "Sí")
-      '',                                    // H ¿Vino?
-      ''                                     // I ¿Volvió / se inscribió?
-    ]]);
-    sheet.getRange(row, ETER.COL.K).setValue(textoPlanilla_(nota)); // K Notas (J no se toca)
-    SpreadsheetApp.flush();
-    console.log('registrar_: anotado pago ' + paymentId + ' en fila ' + row);
-    return { ok: true, written: true, row: row };
+    // 3) K primero: reserva la fila con el id (si algo falla después, el reintento la encuentra).
+    if (!completar) sheet.getRange(row, ETER.COL.K).setValue(textoPlanilla_(nota));
+
+    // 4) A:I (J no se toca).
+    try {
+      sheet.getRange(row, 1, 1, 9).setValues([[
+        hoy,                                   // A Fecha anotación (serial → se ve dd/mm)
+        textoPlanilla_(datos.nombre),          // B Nombre (anti fórmulas)
+        whatsappPlanilla_(datos.whatsapp),     // C WhatsApp (texto)
+        textoPlanilla_(origen.valor),          // D Anuncio de origen (de la lista)
+        ETER.DISCIPLINAS[datos.disciplina],    // E Disciplina
+        clase,                                 // F Día y hora de la clase (serial → dd/mm HH:mm; alimenta la fórmula de J)
+        prueba ? 'PRUEBA' : 'Sí',              // G ¿Confirmó? (en mock/sandbox nunca "Sí")
+        '',                                    // H ¿Vino?
+        ''                                     // I ¿Volvió / se inscribió?
+      ]]);
+      SpreadsheetApp.flush();
+    } catch (err) {
+      console.error('registrar_: falló la escritura de A:I en la fila ' + row + ' para ' + paymentId +
+        ' (' + (err && err.message) + '). K queda con el id; el próximo intento completa la fila.');
+      return { ok: false, written: false, error: 'escritura', row: row };
+    }
+    console.log('registrar_: anotado pago ' + paymentId + ' en fila ' + row + (completar ? ' (completada)' : ''));
+    return { ok: true, written: true, row: row, completed: completar };
   } finally {
     lock.releaseLock();
   }
@@ -470,7 +527,7 @@ function checkConfig() {
     mode: c.mode,
     config_ok: !motivoConfigInvalida_(c),
     config_problema: motivoConfigInvalida_(c) || '(ninguno)',
-    planilla_id_es_mock: sheet.getParent().getId() === c.mockSheetId,
+    planilla_id_es_prueba: sheet.getParent().getId() === idPlanillaPrueba_(c),
     token_cargado: !!c.token,
     webhook_key_cargada: !!c.webhookKey,
     collector_id: c.collectorId || '(sin cargar)',
@@ -505,8 +562,8 @@ function obtenerPago_(id, token) {
 }
 
 /**
- * Solo acepta: aprobado, $5.000, ARS, referencia de esta landing, live_mode acorde al MODE
- * (true solo en production) y, si MP_COLLECTOR_ID está cargado, cobrado por esa cuenta.
+ * Solo acepta: aprobado, $5.000, ARS, referencia de esta landing, cobrado por MP_COLLECTOR_ID
+ * (obligatorio fuera de mock) y live_mode acorde al MODE (true solo en production).
  */
 function pagoValido_(p, cfg) {
   var c = cfg || cfg_();
@@ -515,7 +572,7 @@ function pagoValido_(p, cfg) {
   if (Number(p.transaction_amount) !== ETER.PRECIO) return { ok: false, motivo: 'monto ' + p.transaction_amount };
   if (p.currency_id !== ETER.MONEDA) return { ok: false, motivo: 'moneda ' + p.currency_id };
   if (String(p.external_reference || '').indexOf(ETER.REF_PREFIX) !== 0) return { ok: false, motivo: 'referencia' };
-  if (c.collectorId && String(p.collector_id) !== c.collectorId) return { ok: false, motivo: 'collector ' + p.collector_id };
+  if (!c.collectorId || String(p.collector_id) !== c.collectorId) return { ok: false, motivo: 'collector ' + p.collector_id };
   if (p.live_mode !== (c.mode === 'production')) return { ok: false, motivo: 'live_mode ' + p.live_mode };
   return { ok: true };
 }
@@ -539,8 +596,28 @@ function datosDePago_(p) {
   return d;
 }
 
+/**
+ * Datos del pago revalidados con las mismas reglas que el create (disciplina, fecha, hora, nombre con
+ * letras, celular). Se permite una clase ya pasada: el pago pudo aprobarse antes y anotarse tarde.
+ * Devuelve { ok, datos } o { ok:false, motivo } (y lo loguea).
+ */
+function datosValidadosDePago_(p) {
+  var d = datosDePago_(p);
+  var v = validarReserva_({
+    nombre: d.nombre, whatsapp: d.whatsapp, disciplina: d.disciplina,
+    fecha: d.fecha, hora: d.hora, origen: d.origen
+  }, { permitirPasada: true });
+  if (!v.ok) {
+    console.error('metadata inválida en el pago ' + (p && p.id) + ': ' + v.message + ' No se anota.');
+    return { ok: false, motivo: v.message };
+  }
+  v.datos.reserva_id = d.reserva_id || (p && p.external_reference) || '';
+  return { ok: true, datos: v.datos };
+}
+
 // ───────────────────────── Validaciones ─────────────────────────
-function validarReserva_(b) {
+function validarReserva_(b, opciones) {
+  var permitirPasada = !!(opciones && opciones.permitirPasada);
   var disciplina = String(b.disciplina || '').trim().toLowerCase();
   var fecha = String(b.fecha || '').trim();
   var hora = String(b.hora || '').trim();
@@ -551,7 +628,7 @@ function validarReserva_(b) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || !fechaReal_(fecha)) return { ok: false, message: 'La fecha no es válida.' };
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(hora)) return { ok: false, message: 'La hora no es válida.' };
   var ahora = Utilities.formatDate(new Date(), ETER.TZ, 'yyyy-MM-dd HH:mm');
-  if (fecha + ' ' + hora < ahora) return { ok: false, message: 'Esa clase ya pasó.' };
+  if (!permitirPasada && fecha + ' ' + hora < ahora) return { ok: false, message: 'Esa clase ya pasó.' };
   if (nombre.length < 2 || nombre.length > 60) return { ok: false, message: 'Revisá el nombre.' };
   if (!LETRA_RE.test(nombre)) return { ok: false, message: 'Revisá el nombre: tiene que tener al menos una letra.' };
   // (La protección contra fórmulas se aplica al escribir en la planilla: textoPlanilla_.)
