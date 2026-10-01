@@ -84,7 +84,7 @@ function makeEnv(opts) {
         fetches.push({ url, o });
         const m = url.match(/\/v1\/payments\/(\d+)$/);
         if (m && mpPayments[m[1]]) return { getResponseCode: () => 200, getContentText: () => JSON.stringify(mpPayments[m[1]]) };
-        if (/checkout\/preferences/.test(url)) return { getResponseCode: () => 201, getContentText: () => JSON.stringify({ init_point: 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=1', sandbox_init_point: 'https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=1' }) };
+        if (/checkout\/preferences/.test(url)) return { getResponseCode: () => 201, getContentText: () => JSON.stringify(opts.prefResponse || { init_point: 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=1', sandbox_init_point: 'https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=1' }) };
         return { getResponseCode: () => 404, getContentText: () => '{}' };
       }
     },
@@ -289,7 +289,14 @@ console.log('\n[B3] webhook key');
     const e = mk();
     const c = post(e, baseReq());
     const pref = JSON.parse(e.__.fetches[0].o.payload);
-    check('create sandbox: notification_url = WEBAPP_URL?src=mp&k=<encodeURIComponent(KEY)>', pref.notification_url === 'https://script.google.com/macros/s/X/exec?src=mp&k=' + encodeURIComponent(KEY) && c.init_point.indexOf('https://sandbox.mercadopago.com.ar/') === 0, pref.notification_url);
+    check('create sandbox: notification_url = WEBAPP_URL?src=mp&k=<encodeURIComponent(KEY)>', pref.notification_url === 'https://script.google.com/macros/s/X/exec?src=mp&k=' + encodeURIComponent(KEY), pref.notification_url);
+    check('[B-5] create sandbox usa init_point (no sandbox_init_point aunque MP lo mande)', c.ok === true && c.mode === 'sandbox' && c.init_point === 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=1', c);
+    const e3 = makeEnv({ props: SANDBOX_OK, prefResponse: { sandbox_init_point: 'https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=9' } });
+    const c3 = post(e3, baseReq());
+    check('[B-5] sandbox: MP manda solo sandbox_init_point → no se usa, error mp "No recibimos el link"', c3.ok === false && c3.error === 'mp' && /link de pago/.test(c3.message), c3);
+    const e4 = makeEnv({ props: PROD_OK, activeId: 'REAL_SHEET' });
+    const c4 = post(e4, baseReq());
+    check('[B-5] production: init_point', c4.ok === true && c4.init_point === 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=1', c4);
     const p2 = Object.assign({}, PROD_OK); delete p2.WEBHOOK_KEY;
     const e2 = makeEnv({ props: p2, activeId: 'REAL_SHEET' });
     const c2 = post(e2, baseReq());
@@ -500,9 +507,9 @@ console.log('\n[RL] límite de pedidos');
   check('  limitado: 0 UrlFetch, 0 aperturas de planilla, 0 lock, 0 escrituras, 1 sola lectura de properties', desp.fetch === antes.fetch && desp.ssOpen === antes.ssOpen && desp.lock === antes.lock && desp.writes === antes.writes && desp.propsRead - antes.propsRead === 1, { antes, desp });
   for (let i = 0; i < 20; i++) create(e, 100 + i);
   check('  log una sola vez por ventana (21 rechazos → 1 warn)', warnsRL(e) === 1, warnsRL(e));
-  const put0 = e.__.counts.cachePut; create(e, 200);
-  check('  ya excedido: no escribe en el caché (solo lee)', e.__.counts.cachePut === put0);
   const kMin = Object.keys(e.__.cache).find(k => /^rl:create:m:/.test(k));
+  const vMin0 = e.__.cache[kMin].v, put0 = e.__.counts.cachePut; create(e, 200);
+  check('  ya excedido: el bucket global no se reescribe (solo se lee; se cuenta solo el del número nuevo)', e.__.cache[kMin].v === vMin0 && e.__.counts.cachePut - put0 === 1, { vMin0, v: e.__.cache[kMin].v, puts: e.__.counts.cachePut - put0 });
   check('  TTL de la ventana de 1 min = 120 s (ventana + 60)', e.__.cache[kMin].exp - e.__.clock.now === 120000, e.__.cache[kMin].exp - e.__.clock.now);
   e.__.clock.now += 60000;
   check('create: ventana nueva (+60 s) → vuelve a pasar', create(e, 300).ok === true);
@@ -560,6 +567,44 @@ console.log('\n[RL] límite de pedidos');
   check('webhook con clave válida (RL_WEBHOOK_PER_MIN=3): 3 pasan, el 4.º rate_limited sin consultar a MP', whs.slice(0, 3).every(r => r.ok) && whs[3].error === 'rate_limited' && ek.__.fetches.length === 3, { whs, f: ek.__.fetches.length });
   check('  los pedidos de webhook no consumen el límite de create', post(ek, baseReq()).ok === true);
 
+  // [M-1/B-7] validación antes de cualquier límite; por número antes que global
+  {
+    const rlKeys = (env, re) => Object.keys(env.__.cache).filter(k => re.test(k));
+    const ei = makeEnv({ props: MOCK_OK });
+    const malos = [
+      baseReq({ whatsapp: '123' }), baseReq({ nombre: '1234' }), baseReq({ disciplina: 'nada' }),
+      baseReq({ fecha: '2020-01-01' }), baseReq({ fecha: '2026-02-30' }), baseReq({ hora: '25:00' }),
+      { action: 'create' }, baseReq({ nombre: 'x' })
+    ];
+    const rs = []; for (let i = 0; i < 40; i++) rs.push(post(ei, malos[i % malos.length]));
+    check('[M-1] 40 create inválidos → todos "invalid", 0 claves rl:* en el caché (ni global ni por número), 0 properties', rs.every(r => r.ok === false && r.error === 'invalid') && rlKeys(ei, /^rl:/).length === 0 && ei.__.counts.propsRead === 0 && ei.__.counts.ssOpen === 0, { r0: rs[0], keys: rlKeys(ei, /^rl:/), props: ei.__.counts.propsRead });
+    let okv = 0; for (let i = 0; i < 10; i++) if (create(ei, 900 + i).ok) okv++;
+    check('[M-1]   después de 40 inválidos siguen entrando 10 válidos (cupo global intacto)', okv === 10, okv);
+    const ec2 = makeEnv({ props: { MODE: 'roto' } });
+    const ri = post(ec2, baseReq({ whatsapp: '1' }));
+    check('[M-1] inválido con config rota → "invalid" sin contar límites ni leer config', ri.error === 'invalid' && rlKeys(ec2, /^rl:/).length === 0 && ec2.__.counts.propsRead === 0, ri);
+
+    const eo = makeEnv({ props: MOCK_OK });
+    for (let i = 0; i < 3; i++) post(eo, baseReq({ whatsapp: '11 2345-6789' }));
+    const kM = rlKeys(eo, /^rl:create:m:/)[0], kH = rlKeys(eo, /^rl:create:h:/)[0];
+    const m0 = eo.__.cache[kM].v, h0 = eo.__.cache[kH].v;
+    const lim = []; for (let i = 0; i < 20; i++) lim.push(post(eo, baseReq({ whatsapp: '11 2345-6789' })));
+    check('[B-7] 20 pedidos de un número ya limitado → rate_limited por persona y NO suman al global (minuto ni hora)',
+      lim.every(r => r.error === 'rate_limited' && /este WhatsApp/.test(r.message)) && eo.__.cache[kM].v === m0 && eo.__.cache[kH].v === h0 && m0 === '3' && h0 === '3', { m0, h0, m: eo.__.cache[kM].v, h: eo.__.cache[kH].v });
+    let okn = 0; for (let i = 0; i < 7; i++) if (create(eo, 950 + i).ok) okn++;
+    check('[B-7]   el cupo global sigue disponible: 7 números distintos más pasan (3+7=10)', okn === 7 && create(eo, 960).error === 'rate_limited', okn);
+
+    // orden: si el global está agotado, el del número igual se cuenta primero (y el global solo se lee)
+    const eg2 = makeEnv({ props: Object.assign({}, MOCK_OK, { RL_CREATE_PER_MIN: '1' }) });
+    create(eg2, 1);
+    const rg = post(eg2, baseReq({ whatsapp: '11 6666-0000' }));
+    const kW = rlKeys(eg2, /^rl:create:wa:/);
+    check('[B-7] global agotado → mensaje global; el bucket por número se contó primero', rg.error === 'rate_limited' && /muchos pedidos/.test(rg.message) && kW.length === 2, { rg, kW });
+    // por minuto agotado no consume el de la hora
+    const kH2 = rlKeys(eg2, /^rl:create:h:/)[0];
+    check('[B-7] por minuto agotado → el bucket por hora no se incrementa', eg2.__.cache[kH2].v === '1', eg2.__.cache[kH2].v);
+  }
+
   // el límite va antes de la configuración
   const ec = makeEnv({ props: { MODE: 'roto', RL_CREATE_PER_MIN: '1' } });
   post(ec, baseReq());
@@ -577,8 +622,8 @@ console.log('\n[RL] límite de pedidos');
   }
   const ed = makeEnv({ props: MOCK_OK });
   const d = ed.ETER.RL.DEFAULTS;
-  check('defaults: create 10/min, 60/h, 3 por WhatsApp/10 min; verify 30/min, 300/h; webhook 60/min',
-    d.RL_CREATE_PER_MIN === 10 && d.RL_CREATE_PER_HOUR === 60 && d.RL_CREATE_PER_WA_10MIN === 3 && d.RL_VERIFY_PER_MIN === 30 && d.RL_VERIFY_PER_HOUR === 300 && d.RL_WEBHOOK_PER_MIN === 60, d);
+  check('defaults: create 10/min, 250/h, 3 por WhatsApp/10 min; verify 30/min, 300/h; webhook 60/min',
+    d.RL_CREATE_PER_MIN === 10 && d.RL_CREATE_PER_HOUR === 250 && d.RL_CREATE_PER_WA_10MIN === 3 && d.RL_VERIFY_PER_MIN === 30 && d.RL_VERIFY_PER_HOUR === 300 && d.RL_WEBHOOK_PER_MIN === 60, d);
   const egb = makeEnv({ props: Object.assign({}, MOCK_OK, { RL_CREATE_PER_MIN: 'mucho' }) });
   let okg = 0; for (let i = 0; i < 11; i++) if (create(egb, i).ok) okg++;
   check('RL_CREATE_PER_MIN basura → default 10 (el 11.º limitado)', okg === 10);

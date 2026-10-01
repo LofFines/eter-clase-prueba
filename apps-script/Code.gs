@@ -76,7 +76,7 @@ var ETER = {
     MAX: 100000,
     DEFAULTS: {
       RL_CREATE_PER_MIN: 10,        // create, global por minuto
-      RL_CREATE_PER_HOUR: 60,       // create, global por hora
+      RL_CREATE_PER_HOUR: 250,      // create, global por hora
       RL_CREATE_PER_WA_10MIN: 3,    // create, por WhatsApp normalizado cada 10 min
       RL_VERIFY_PER_MIN: 30,        // verify, global por minuto (en sandbox/producción consulta a MP)
       RL_VERIFY_PER_HOUR: 300,      // verify, global por hora (tope diario ≈ 7.200 consultas a MP)
@@ -179,8 +179,11 @@ function doGet() {
  * Orden (de lo más barato a lo más caro):
  *  1) tamaño del cuerpo (> 4 KB → rechazo sin parsear)
  *  2) JSON.parse
- *  3) create/verify: límites globales (+ por WhatsApp en create, con validación mínima de ese campo),
- *     antes de cfg_, de abrir la planilla, del lock y de MP
+ *  3) create: validarReserva_ (solo el cuerpo: sin planilla, sin MP, sin properties); si es inválido
+ *     se responde "invalid" SIN contar ningún límite. Después límite por WhatsApp y, solo si pasa,
+ *     los globales (minuto y hora). Así un pedido inválido o de un número ya limitado no gasta cupo global.
+ *     verify: límites globales.
+ *     Todo esto va antes de cfg_, de abrir la planilla, del lock y de MP.
  *  4) configuración (configError_) y recién ahí el handler
  *  Notificaciones de MP: clave WEBHOOK_KEY primero (gratis), después su propio límite, después config.
  */
@@ -193,12 +196,21 @@ function doPost(e) {
     try { body = raw ? JSON.parse(raw) : null; } catch (err) { body = null; }
     if (body !== null && (typeof body !== 'object' || Array.isArray(body))) body = null;
 
-    if (body && (body.action === 'create' || body.action === 'verify')) {
-      var limitado = body.action === 'create' ? limiteCreate_(body) : limiteVerify_();
-      if (limitado) return json_(limitado);
-      var errCfg = configError_(cfg_(), 'doPost ' + body.action);
-      if (errCfg) return json_(errCfg);
-      return json_(body.action === 'create' ? handleCreate_(body) : handleVerify_(body));
+    if (body && body.action === 'create') {
+      var v = validarReserva_(body);
+      if (!v.ok) return json_({ ok: false, error: 'invalid', message: v.message });
+      var limitadoC = limiteCreate_(v.datos.whatsapp);
+      if (limitadoC) return json_(limitadoC);
+      var errCfgC = configError_(cfg_(), 'doPost create');
+      if (errCfgC) return json_(errCfgC);
+      return json_(handleCreate_(body, v));
+    }
+    if (body && body.action === 'verify') {
+      var limitadoV = limiteVerify_();
+      if (limitadoV) return json_(limitadoV);
+      var errCfgV = configError_(cfg_(), 'doPost verify');
+      if (errCfgV) return json_(errCfgV);
+      return json_(handleVerify_(body));
     }
 
     // Si no es una acción nuestra, lo tratamos como notificación de Mercado Pago
@@ -258,15 +270,18 @@ function rlContar_(clave, limite, ventanaSeg) {
   return true;
 }
 
-/** null si pasa; si no, la respuesta rate_limited. Global (minuto y hora) y por WhatsApp normalizado. */
-function limiteCreate_(b) {
+/**
+ * null si pasa; si no, la respuesta rate_limited. Recibe el WhatsApp YA normalizado por validarReserva_.
+ * Primero el límite por número; solo si pasa se cuentan los globales (minuto y después hora), así un
+ * número ya limitado no consume cupo global.
+ */
+function limiteCreate_(wa) {
+  if (!wa || !rlContar_('create:wa:' + hashCorto_(wa), limite_('RL_CREATE_PER_WA_10MIN'), 600)) {
+    return { ok: false, error: 'rate_limited', message: RL_MSG_PERSONA };
+  }
   if (!rlContar_('create:m', limite_('RL_CREATE_PER_MIN'), 60) ||
       !rlContar_('create:h', limite_('RL_CREATE_PER_HOUR'), 3600)) {
     return { ok: false, error: 'rate_limited', message: RL_MSG_GLOBAL };
-  }
-  var wa = normalizarCelular_(b.whatsapp); // validación mínima del campo (el resto la hace validarReserva_)
-  if (wa && !rlContar_('create:wa:' + hashCorto_(wa), limite_('RL_CREATE_PER_WA_10MIN'), 600)) {
-    return { ok: false, error: 'rate_limited', message: RL_MSG_PERSONA };
   }
   return null;
 }
@@ -291,11 +306,12 @@ function hashCorto_(s) {
 }
 
 // ───────────────────────── create ─────────────────────────
-function handleCreate_(b) {
+/** pre: resultado de validarReserva_(b) ya calculado en doPost (opcional; si falta, se valida acá). */
+function handleCreate_(b, pre) {
   var c = cfg_();
   var errCfg = configError_(c, 'create');
   if (errCfg) return errCfg;
-  var v = validarReserva_(b);
+  var v = (pre && pre.ok && pre.datos) ? pre : validarReserva_(b);
   if (!v.ok) return { ok: false, error: 'invalid', message: v.message };
   var datos = v.datos;
   var reservaId = nuevaReserva_();
@@ -360,9 +376,9 @@ function handleCreate_(b) {
     console.error('create: MP respondió ' + res.code + ' ' + resumenError_(res.data));
     return { ok: false, error: 'mp', message: 'Mercado Pago no respondió como esperábamos.' };
   }
-  var initPoint = c.mode === 'sandbox'
-    ? (res.data.sandbox_init_point || res.data.init_point)
-    : res.data.init_point;
+  // init_point en todos los modos: MP discontinúa sandbox_init_point (con credenciales de prueba
+  // init_point ya abre el checkout de prueba). El front igual lo pasa por su lista blanca.
+  var initPoint = res.data && res.data.init_point;
   if (!initPoint) return { ok: false, error: 'mp', message: 'No recibimos el link de pago.' };
   return { ok: true, mode: c.mode, reserva_id: reservaId, init_point: initPoint };
 }

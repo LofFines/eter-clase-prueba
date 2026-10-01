@@ -88,6 +88,7 @@ async function submitForm(page, nombre) {
       ['mock, mismo origen pero otra carpeta', { ok: true, mode: 'mock', init_point: 'http://localhost:' + PORT + '/otro/confirmacion.html?payment_id=MOCK-X' }, false],
       ['www.mercadopago.com.ar', { ok: true, mode: 'production', init_point: 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=1' }, true],
       ['sandbox.mercadopago.com.ar', { ok: true, mode: 'sandbox', init_point: 'https://sandbox.mercadopago.com.ar/checkout/v1/redirect?pref_id=1' }, true],
+      ['[B-5] mode=sandbox con init_point de www.mercadopago.com.ar', { ok: true, mode: 'sandbox', init_point: 'https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=2' }, true],
       ['mock + propio sitio (origin+carpeta)/confirmacion.html', { ok: true, mode: 'mock', init_point: BASE + 'confirmacion.html?payment_id=MOCK-ABC&status=approved&external_reference=ETER-1' }, true],
     ];
     for (const [n, resp, debeIr] of casos) {
